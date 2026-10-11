@@ -1,0 +1,19 @@
+# Trivy vulnerability ignore list for moneyflow-api
+#
+# CVE-2026-47884 / CVE-2026-47890 - Spring Framework (spring-webmvc).
+# Open-source fix exists only in Spring Framework 7.0.9, which requires
+# Spring Boot 4.x - an architecture-level migration, not a point upgrade.
+# The Spring Boot 3.5.x line took its final OSS patch on 2026-06-30; no
+# free 6.2.x backport exists (6.2.20 is Enterprise Support only).
+#
+# Both CVEs require code paths this app doesn't have:
+#   - CVE-2026-47884: needs XsltView + an unmapped "/**" catch-all view
+#     resolution. This app is REST-only - @RestController everywhere,
+#     no view resolvers at all.
+#   - CVE-2026-47890: needs server-rendered view fragments streamed over
+#     Server-Sent Events. No SSE/fragment streaming exists in this app.
+#
+# Risk accepted as unreachable. Tracked for the planned Spring Boot 4
+# migration - re-run Trivy after that lands and delete these two lines.
+CVE-2026-47884 exp:2027-04-01
+CVE-2026-47890 exp:2027-04-01

@@ -75,6 +75,7 @@ jobs:
           format: table
           severity: CRITICAL,HIGH
           exit-code: "1" # fail the job if anything CRITICAL/HIGH turns up - same instinct as failing a build on a lint error
+          trivyignores: .trivyignore
 
       - name: Push image (only reached if the scan passed)
         uses: docker/build-push-action@v7
