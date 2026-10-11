@@ -28,15 +28,14 @@ public class GoalService {
     private final GoalRepository goalRepository;
     private final AccountRepository accountRepository;
     private final UserRepository userRepository;
-    private final TransactionRepository transactionRepository;
-    private final TransactionGoalAllocationRepository transactionGoalAllocationRepository;
+    private final GoalCreditService goalCreditService;
     private static final Set<String> VALID_GOAL_STATUSES = Set.of("IN_PROGRESS", "COMPLETED");
 
     @Transactional(readOnly = true)
     public List<GoalResponse> getGoals(String userId) {
         return goalRepository
                 .findByUserIdAndActiveTrueOrderByDisplayOrderAsc(userId)
-                .stream().map(g -> GoalResponse.from(g, creditedThisMonth(g))).toList();
+                .stream().map(g -> GoalResponse.from(g, goalCreditService.creditedThisMonth(g))).toList();
     }
 
     @Transactional(readOnly = true)
@@ -54,14 +53,14 @@ public class GoalService {
                 ? Comparator.comparing(GoalService::isUpcoming).thenComparing(Goal::getDisplayOrder)
                 : Comparator.comparing(Goal::getDisplayOrder);
 
-        return goals.stream().sorted(order).map(g -> GoalResponse.from(g, creditedThisMonth(g))).toList();
+        return goals.stream().sorted(order).map(g -> GoalResponse.from(g, goalCreditService.creditedThisMonth(g))).toList();
     }
 
     @Transactional(readOnly = true)
     public GoalResponse getGoal(String userId, String goalId) {
         return goalRepository
                 .findByIdAndUserId(goalId, userId)
-                .map(g -> GoalResponse.from(g, creditedThisMonth(g)))
+                .map(g -> GoalResponse.from(g, goalCreditService.creditedThisMonth(g)))
                 .orElseThrow(() -> ApiException.notFound("Goal not found"));
     }
 
@@ -109,7 +108,7 @@ public class GoalService {
         goal.setMonthlySavingsRequired(calculatePlannedMonthlySavings(goal));
 
         Goal savedGoal = goalRepository.save(goal);
-        return GoalResponse.from(savedGoal, creditedThisMonth(savedGoal));
+        return GoalResponse.from(savedGoal, goalCreditService.creditedThisMonth(savedGoal));
     }
 
     @Transactional
@@ -198,7 +197,7 @@ public class GoalService {
 
         Goal savedGoal = goalRepository.save(goal);
 
-        return GoalResponse.from(savedGoal, creditedThisMonth(savedGoal));
+        return GoalResponse.from(savedGoal, goalCreditService.creditedThisMonth(savedGoal));
     }
 
     /**
@@ -224,7 +223,7 @@ public class GoalService {
 
         goal.setStatus("COMPLETED");
         Goal savedGoal = goalRepository.save(goal);
-        return GoalResponse.from(savedGoal, creditedThisMonth(savedGoal));
+        return GoalResponse.from(savedGoal, goalCreditService.creditedThisMonth(savedGoal));
     }
 
     /** Undoes markGoalComplete, e.g. if completed by mistake. */
@@ -239,7 +238,7 @@ public class GoalService {
 
         goal.setStatus("IN_PROGRESS");
         Goal savedGoal = goalRepository.save(goal);
-        return GoalResponse.from(savedGoal, creditedThisMonth(savedGoal));
+        return GoalResponse.from(savedGoal, goalCreditService.creditedThisMonth(savedGoal));
     }
 
     @Transactional
@@ -298,15 +297,5 @@ public class GoalService {
 
     private static boolean isUpcoming(Goal goal) {
         return goal.getStartDate() != null && goal.getStartDate().isAfter(AppClock.today());
-    }
-
-    /** Net amount actually credited to this goal in the current calendar month - deposits minus withdrawals. */
-    private BigDecimal creditedThisMonth(Goal goal) {
-        LocalDate now = AppClock.today();
-        BigDecimal deposited = transactionRepository.sumGoalCreditByGoalIdAndCalendarMonth(
-                goal.getId(), now.getYear(), now.getMonthValue());
-        BigDecimal withdrawn = transactionGoalAllocationRepository.sumByGoalIdAndCalendarMonth(
-                goal.getId(), now.getYear(), now.getMonthValue());
-        return deposited.subtract(withdrawn);
     }
 }

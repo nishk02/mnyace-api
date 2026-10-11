@@ -7,7 +7,9 @@ import com.moneyflow.auth.User;
 import com.moneyflow.auth.UserRepository;
 import com.moneyflow.category.Category;
 import com.moneyflow.goal.Goal;
+import com.moneyflow.goal.GoalCreditService;
 import com.moneyflow.goal.GoalRepository;
+import com.moneyflow.goal.GoalResponse;
 import com.moneyflow.shared.exception.ApiException;
 import com.moneyflow.shared.util.AppClock;
 import com.moneyflow.transaction.*;
@@ -32,6 +34,7 @@ public class DashboardService {
     private final TransactionRepository transactionRepository;
     private final GoalRepository goalRepository;
     private final GoalAllocationService goalAllocationService;
+    private final GoalCreditService goalCreditService;
 
     private static final List<String> MOTIVATIONAL_QUOTES = List.of(
             "Savings is a Habit. Keeping track is the Key.",
@@ -67,7 +70,9 @@ public class DashboardService {
 
         BigDecimal monthlyTarget = activeGoals.stream()
                 .filter(g -> !"COMPLETED".equals(g.getStatus()))
-                .map(g -> g.getMonthlySavingsRequired() != null ? g.getMonthlySavingsRequired() : BigDecimal.ZERO)
+                .map(g -> GoalResponse.from(g, goalCreditService.creditedThisMonth(g)))
+                .filter(r -> !r.isUpcoming())
+                .map(GoalResponse::currentMonthlySavingsRequired)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         // Saved this month
