@@ -101,4 +101,14 @@ public interface TransactionRepository extends JpaRepository<Transaction, String
 
     @Query("SELECT MIN(t.date) FROM Transaction t WHERE t.user.id = :userId")
     LocalDate findEarliestDate(@Param("userId") String userId);
+
+    @Query("SELECT COALESCE(SUM(t.goalCreditApplied), 0) FROM Transaction t " +
+            "WHERE t.toGoalId = :goalId " +
+            "AND t.type = 'TRANSFER' " +
+            "AND t.calendarYear = :year " +
+            "AND t.calendarMonth = :month")
+    BigDecimal sumGoalCreditByGoalIdAndCalendarMonth(
+            @Param("goalId") String goalId,
+            @Param("year") int year,
+            @Param("month") int month);
 }

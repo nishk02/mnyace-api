@@ -1,5 +1,7 @@
 package com.moneyflow.goal;
 
+import com.moneyflow.shared.util.AppClock;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
@@ -19,11 +21,12 @@ public record GoalResponse(
         long monthsRemaining,
         String status,
         boolean isUpcoming,
+        boolean isBehindSchedule,
         int displayOrder
 ) {
     public record AccountSummary(String id, String name, String colorLabel) {}
 
-    public static GoalResponse from(Goal goal) {
+    public static GoalResponse from(Goal goal, BigDecimal creditedThisMonth) {
         AccountSummary account = new AccountSummary(
                 goal.getAccount().getId(),
                 goal.getAccount().getName(),
@@ -32,10 +35,22 @@ public record GoalResponse(
         final BigDecimal progressPercentage = calculateProgressPercentage(goal);
 
         long monthsRemaining = goal.getEndDate() != null
-                ? Math.max(0, monthsBetweenIgnoringDay(LocalDate.now(), goal.getEndDate()))
+                ? Math.max(0, monthsBetweenIgnoringDay(AppClock.today(), goal.getEndDate()))
                 : 0;
 
-        boolean isUpcoming = goal.getStartDate() != null && goal.getStartDate().isAfter(LocalDate.now());
+        boolean isUpcoming = goal.getStartDate() != null && goal.getStartDate().isAfter(AppClock.today());
+
+        // frozen plan, set at creation/re-plan
+        BigDecimal plannedMonthlySavings = goal.getMonthlySavingsRequired();
+        // live, nets this month's own credit
+        BigDecimal currentMonthlySavingsRequired = calculateCurrentMonthlySavingsRequired(goal, creditedThisMonth);
+
+        // Behind the original plan, not just "owes money this month" - a freshly-started or not-yet-started
+        // goal with a valid plan simply isn't behind anything yet.
+        boolean isBehindSchedule = !isUpcoming
+                && plannedMonthlySavings != null
+                && plannedMonthlySavings.compareTo(BigDecimal.ZERO) > 0
+                && currentMonthlySavingsRequired.compareTo(plannedMonthlySavings) > 0;
 
         return new GoalResponse(
                 goal.getId(),
@@ -46,11 +61,12 @@ public record GoalResponse(
                 goal.getEndDate(),
                 goal.getCurrentProgress(),
                 progressPercentage,
-                goal.getMonthlySavingsRequired(), // frozen plan, set at creation/re-plan
-                calculateCurrentMonthlySavingsRequired(goal), // live, recomputed from today
+                plannedMonthlySavings,
+                currentMonthlySavingsRequired,
                 monthsRemaining,
                 goal.getStatus(),
                 isUpcoming,
+                isBehindSchedule,
                 goal.getDisplayOrder()
         );
     }
@@ -68,7 +84,7 @@ public record GoalResponse(
                 .divide(goal.getTargetAmount(), 1, RoundingMode.HALF_UP);
     }
 
-    private static BigDecimal calculateCurrentMonthlySavingsRequired(Goal goal) {
+    private static BigDecimal calculateCurrentMonthlySavingsRequired(Goal goal, BigDecimal creditedThisMonth) {
         if (goal.getTargetAmount() == null || goal.getEndDate() == null) {
             return BigDecimal.ZERO;
         }
@@ -80,13 +96,15 @@ public record GoalResponse(
             return BigDecimal.ZERO;
         }
 
-        long monthsRemaining = Math.max(0, monthsBetweenIgnoringDay(LocalDate.now(), goal.getEndDate()));
+        long monthsRemaining = Math.max(0, monthsBetweenIgnoringDay(AppClock.today(), goal.getEndDate()));
 
-        if (monthsRemaining <= 0) {
-            return remainingAmount;
-        }
+        BigDecimal averagePaceNeeded = monthsRemaining <= 0
+                ? remainingAmount
+                : remainingAmount.divide(BigDecimal.valueOf(monthsRemaining), 1, RoundingMode.HALF_UP);
 
-        return remainingAmount.divide(BigDecimal.valueOf(monthsRemaining), 1, RoundingMode.HALF_UP);
+        // Net out what's already landed in this goal this calendar month - already-met pace reads as 0, not negative.
+        BigDecimal requiredThisMonth = averagePaceNeeded.subtract(creditedThisMonth);
+        return requiredThisMonth.compareTo(BigDecimal.ZERO) > 0 ? requiredThisMonth : BigDecimal.ZERO;
     }
 
     /** Months between two dates, ignoring the day-of-month component. */
