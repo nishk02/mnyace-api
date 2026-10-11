@@ -391,10 +391,14 @@ Derived from: Goals screens (pages 26–29), Excel Goals sheet
 
 **Computed at read time (not stored):**
 - `progressPercentage` = (currentProgress / targetAmount) × 100
-- `currentMonthlySavingsRequired` = `(targetAmount - currentProgress) / monthsRemaining`, baselined from today — the live "what do I need to do from here" figure, distinct from the frozen `plannedMonthlySavings` above. See BR-21.
+- `currentMonthlySavingsRequired` = `max(0, averagePaceNeeded - creditedThisMonth)`, where `averagePaceNeeded = (targetAmount - currentProgress) / monthsRemaining` — the live "what do I need to do from here" figure, distinct from the frozen `plannedMonthlySavings` above, netted against whatever this goal has already received this calendar month so an already-met pace reads `0`, not a stale leftover figure. See BR-21 and BR-25.
 - `monthsRemaining` = calendar months between today and `endDate`, ignoring day-of-month — see BR-21.
 - `isUpcoming` = `startDate.isAfter(today)` — a goal whose start date hasn't arrived yet. Recomputed on every read, not stored or transitioned by any background process — see BR-24.
+- `isBehindSchedule` = `!isUpcoming && plannedMonthlySavings > 0 && currentMonthlySavingsRequired > plannedMonthlySavings` — true once the live pace needed has risen past the original frozen plan. See BR-25.
+- `creditedThisMonth` (internal, not serialized) = net amount credited to *this* goal in the current calendar month — deposits (`transaction.goalCreditApplied` for TRANSFERs crediting this goal) minus withdrawals (`TransactionGoalAllocation.amount` for allocation rows against this goal). See BR-25.
 - `savedThisMonth` = sum of TRANSFER transactions to this goal in current calendar month
+
+Every `today` above resolves via `AppClock` (pinned to `Asia/Kolkata`), not the server JVM's own default timezone — see BR-25.
 
 **An account may back more than one active goal (v1.5.0):** the original singular per-account goal lookup used for withdrawal crediting has been replaced by the allocation ledger (§3.6a) precisely to support this — an account like "Axis Bank" can simultaneously back an Emergency Fund and a Vacation goal, each tracked independently.
 
@@ -853,7 +857,8 @@ com.moneyflow
     ├── dto/
     │   └── ApiResponse.java          Standard envelope for all responses; ApiError +details (v1.5.0)
     └── util/
-        └── FinancialYearUtil.java    Date → FY label, month number
+        ├── FinancialYearUtil.java    Date → FY label, month number
+        └── AppClock.java             "Today" pinned to Asia/Kolkata — see BR-25
 ```
 
 ---
@@ -1361,13 +1366,14 @@ Both `POST /transactions` and `PUT /transactions/{id}` reject any `date` later t
     "plannedMonthlySavings": 9090.91,
     "currentMonthlySavingsRequired": 9090.91,
     "monthsRemaining": 11,
+    "isBehindSchedule": false,
     "savedThisMonth": 0.00,
     "status": "IN_PROGRESS"
   }
 }
 ```
 
-`plannedMonthlySavings` = `targetAmount / totalMonths` (startDate to endDate) — frozen at creation, ignores progress entirely. `currentMonthlySavingsRequired` = `(targetAmount - currentProgress) / monthsRemaining`, recomputed from today on every read. The two start out equal and diverge the moment any progress is made — see BR-21.
+`plannedMonthlySavings` = `targetAmount / totalMonths` (startDate to endDate) — frozen at creation, ignores progress entirely. `currentMonthlySavingsRequired` = `max(0, (targetAmount - currentProgress) / monthsRemaining - creditedThisMonth)`, recomputed from today on every read. The two start out equal and diverge the moment any progress is made; once `currentMonthlySavingsRequired` overtakes `plannedMonthlySavings`, `isBehindSchedule` flips `true` — see BR-21 and BR-25.
 **Side effect:** Increments `user.onboardingStep` to 3 if currently 2.
 
 ---
@@ -1375,7 +1381,7 @@ Both `POST /transactions` and `PUT /transactions/{id}` reject any `date` later t
 #### GET /goals
 ```json
 {
-  "data": [ { ...GoalResponse, "isUpcoming": false }, { ...GoalResponse, "isUpcoming": true } ]
+  "data": [ { ...GoalResponse, "isUpcoming": false, "isBehindSchedule": false }, { ...GoalResponse, "isUpcoming": true, "isBehindSchedule": false } ]
 }
 ```
 
@@ -1590,7 +1596,8 @@ The service collects the `MonthSummary` data + goal progress + category breakdow
 | Debt-income ratio | `totalDebt / totalIncome × 100` | Monthly summary |
 | Savings rate | `totalSavings / totalIncome × 100` | Monthly summary |
 | Planned monthly savings *(v1.5.0)* | `targetAmount / totalMonths` (startDate to endDate), ignores progress — see BR-21 | Goal card |
-| Current monthly savings required *(v1.5.0)* | `(targetAmount - currentProgress) / monthsRemaining`, baselined from today — see BR-21 | Goal card |
+| Current monthly savings required *(v1.5.0)* | `max(0, (targetAmount - currentProgress) / monthsRemaining - creditedThisMonth)`, baselined from today — see BR-21, BR-25 | Goal card |
+| Behind schedule *(v1.5.0)* | `!isUpcoming && plannedMonthlySavings > 0 && currentMonthlySavingsRequired > plannedMonthlySavings` — see BR-25 | Goal card |
 | Goal progress % | `currentProgress / targetAmount × 100` | Goal progress bar |
 | Free balance *(v1.5.0)* | `account.currentBalance - Σ(currentProgress of that account's active goals)` | Withdrawal allocation guard (BR-19) |
 | Days until due | `nextDueDate - today` | Planned amounts list |
@@ -1882,6 +1889,16 @@ Within the `IN_PROGRESS` result, goals are grouped ongoing (`startDate` has alre
 
 ---
 
+
+### BR-25: Monthly Savings Netting, Behind-Schedule Signal & App-Wide Clock *(added v1.5.0)*
+
+**`currentMonthlySavingsRequired` now nets out this month's own credit.** The original formula (`(targetAmount - currentProgress) / monthsRemaining`) answered "what's the average pace needed from here," but didn't check whether that pace had already been met this calendar month — a goal that had already deposited enough this month still showed the full average-pace figure, reading as a still-outstanding requirement when nothing more was actually owed. The fix introduces `creditedThisMonth`: the net amount this specific goal has received in the current calendar month, deposits minus withdrawals — deposits sum `transaction.goalCreditApplied` (not `transaction.amount`, to respect BR-23's overflow clamp) for TRANSFERs crediting this goal; withdrawals sum `TransactionGoalAllocation.amount` for allocation rows against this goal. `currentMonthlySavingsRequired` is now `max(0, averagePaceNeeded - creditedThisMonth)` — floored at zero so an already-met month reads as "nothing more needed," not a negative figure.
+
+This isn't a one-time correction baked into a single read — `monthsRemaining` keeps shrinking every month regardless of whether a deposit was made, while `remainingAmount` only drops when a deposit actually lands. So a missed month needs no explicit "missed month" tracking: the average-pace figure for the following month rises on its own, because the same remaining amount is now divided by one fewer month. The system doesn't forgive a skipped month by design.
+
+**`isBehindSchedule`** = `!isUpcoming && plannedMonthlySavings > 0 && currentMonthlySavingsRequired > plannedMonthlySavings` — true once the live pace needed has risen past the original frozen plan, i.e. real time (or a target/date edit) has outpaced what was committed to at creation. A freshly created or not-yet-started goal can never read `true`: on creation `plannedMonthlySavings` and `currentMonthlySavingsRequired` are computed from the same inputs and start out numerically equal, and `isUpcoming` separately guards the not-yet-started case. Computed server-side rather than left to the frontend, specifically so a future server-side notification/scan can read it without the client having already fetched the goal.
+
+**`AppClock`** (`shared/util/AppClock`, pinned to `Asia/Kolkata`) replaces every ad hoc `LocalDate.now()` across the app (goal, transaction, dashboard, and analytics modules) as the single source of "today." Moneyflow is a single-user, India-only app, so the correct behaviour is "today in India," not "today on whatever timezone the server's host or JVM happens to be running in" — a server deployed on a UTC host would otherwise compute goal month-boundaries, `isUpcoming`, and `isBehindSchedule` up to a day off from the user's own calendar. Mirrors the existing `FinancialYearUtil` utility-class pattern (private constructor, static methods, same package).
 ## 10. Screens-to-API Mapping
 
 | Screen (Figma page) | API calls made |
