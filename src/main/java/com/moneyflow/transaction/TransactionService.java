@@ -11,6 +11,7 @@ import com.moneyflow.goal.GoalRepository;
 import com.moneyflow.shared.dto.PageResponse;
 import com.moneyflow.shared.exception.ApiErrorCodes;
 import com.moneyflow.shared.exception.ApiException;
+import com.moneyflow.shared.util.AppClock;
 import com.moneyflow.shared.util.FinancialYearUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -147,7 +148,7 @@ public class TransactionService {
                 .filter(c -> !c.isInternal())
                 .orElseThrow(() -> ApiException.notFound("Category not found"));
 
-        if (request.date().isAfter(LocalDate.now())) {
+        if (request.date().isAfter(AppClock.today())) {
             throw ApiException.badRequest("Transaction date cannot be in the future");
         }
 
@@ -216,7 +217,7 @@ public class TransactionService {
         if (request.amount() != null) transaction.setAmount(request.amount());
         String dateWarning = null;
         if (request.date() != null) {
-            if (request.date().isAfter(LocalDate.now())) {
+            if (request.date().isAfter(AppClock.today())) {
                 throw ApiException.badRequest("Transaction date cannot be in the future");
             }
             transaction.setDate(request.date());
@@ -328,9 +329,9 @@ public class TransactionService {
         t.setType(TransactionType.SETTLEMENT);
         t.setAmount(account.getCurrentBalance());
         t.setNotes("Opening balance");
-        t.setDate(LocalDate.now());
+        t.setDate(AppClock.today());
         t.setPlanned(false);
-        FinancialYearUtil.applyDerivedDateFields(t, LocalDate.now());
+        FinancialYearUtil.applyDerivedDateFields(t, AppClock.today());
 
         transactionRepository.save(t);
     }
@@ -351,9 +352,9 @@ public class TransactionService {
         t.setType(TransactionType.SETTLEMENT);
         t.setAmount(delta);
         t.setNotes(String.format("Balance adjustment: ₹%s → ₹%s", formatAmount(oldBalance), formatAmount(newBalance)));
-        t.setDate(LocalDate.now());
+        t.setDate(AppClock.today());
         t.setPlanned(false);
-        FinancialYearUtil.applyDerivedDateFields(t, LocalDate.now());
+        FinancialYearUtil.applyDerivedDateFields(t, AppClock.today());
 
         return transactionRepository.save(t);
     }

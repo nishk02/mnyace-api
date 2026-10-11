@@ -1,6 +1,7 @@
 package com.moneyflow.analytics;
 
 import com.moneyflow.shared.exception.ApiException;
+import com.moneyflow.shared.util.AppClock;
 import com.moneyflow.transaction.GoalAllocationService;
 import com.moneyflow.transaction.TransactionRepository;
 import com.moneyflow.transaction.TransactionType;
@@ -60,7 +61,7 @@ public class AnalyticsService {
         }
 
         // Use today as anchor if none provided
-        LocalDate pivotDate = anchor != null ? anchor : LocalDate.now();
+        LocalDate pivotDate = anchor != null ? anchor : AppClock.today();
 
         // WEEKLY mode - Monday to Sunday of the week containing pivotDate
         if ("WEEKLY".equalsIgnoreCase(mode)) {

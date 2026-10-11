@@ -9,6 +9,7 @@ import com.moneyflow.category.Category;
 import com.moneyflow.goal.Goal;
 import com.moneyflow.goal.GoalRepository;
 import com.moneyflow.shared.exception.ApiException;
+import com.moneyflow.shared.util.AppClock;
 import com.moneyflow.transaction.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -70,7 +71,7 @@ public class DashboardService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         // Saved this month
-        LocalDate now = LocalDate.now();
+        LocalDate now = AppClock.today();
         BigDecimal grossSavedThisMonth = Optional.ofNullable(transactionRepository
                 .sumTransferToGoalByCalendarMonth(
                         userId,
