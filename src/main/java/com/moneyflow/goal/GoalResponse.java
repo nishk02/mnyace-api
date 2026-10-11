@@ -90,19 +90,21 @@ public record GoalResponse(
         }
 
         BigDecimal currentProgress = goal.getCurrentProgress() != null ? goal.getCurrentProgress() : BigDecimal.ZERO;
-        BigDecimal remainingAmount = goal.getTargetAmount().subtract(currentProgress);
+        BigDecimal actualRemaining = goal.getTargetAmount().subtract(currentProgress);
 
-        if (remainingAmount.compareTo(BigDecimal.ZERO) <= 0) {
+        if (actualRemaining.compareTo(BigDecimal.ZERO) <= 0) {
             return BigDecimal.ZERO;
         }
 
         long monthsRemaining = Math.max(0, monthsBetweenIgnoringDay(AppClock.today(), goal.getEndDate()));
 
-        BigDecimal averagePaceNeeded = monthsRemaining <= 0
-                ? remainingAmount
-                : remainingAmount.divide(BigDecimal.valueOf(monthsRemaining), 1, RoundingMode.HALF_UP);
+        // Pace before this month's own credit, so it isn't subtracted twice.
+        BigDecimal remainingBeforeThisMonth = actualRemaining.add(creditedThisMonth);
 
-        // Net out what's already landed in this goal this calendar month - already-met pace reads as 0, not negative.
+        BigDecimal averagePaceNeeded = monthsRemaining <= 0
+                ? remainingBeforeThisMonth
+                : remainingBeforeThisMonth.divide(BigDecimal.valueOf(monthsRemaining), 1, RoundingMode.HALF_UP);
+
         BigDecimal requiredThisMonth = averagePaceNeeded.subtract(creditedThisMonth);
         return requiredThisMonth.compareTo(BigDecimal.ZERO) > 0 ? requiredThisMonth : BigDecimal.ZERO;
     }
