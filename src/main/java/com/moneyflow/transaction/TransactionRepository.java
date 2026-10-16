@@ -89,7 +89,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, String
             "AND t.type = 'TRANSFER' " +
             "AND t.toGoalId IS NOT NULL " +
             "AND t.calendarYear = :year " +
-            "AND t.calendarMonth = :month")
+            "AND t.calendarMonth = :month " +
+            "AND NOT EXISTS (SELECT 1 FROM Goal g WHERE g.id = t.toGoalId AND g.status = 'COMPLETED')")
     BigDecimal sumTransferToGoalByCalendarMonth(
             @Param("userId") String userId,
             @Param("year") int year,
