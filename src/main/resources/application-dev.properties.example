@@ -11,3 +11,9 @@ cors.allowed-origins=capacitor://localhost,ionic://localhost,http://localhost:81
 # ─── JWT ───────────────────────────────────────────────
 jwt.secret=${JWT_SECRET:moneyflow-local-dev-secret-key-2026-not-for-prod}
 jwt.expiration-ms=86400000
+
+# Root Member Test User (dev only)
+test-user.bootstrap.email=${TEST_USER_EMAIL:}
+test-user.bootstrap.password=${TEST_USER_PASSWORD:}
+test-user.bootstrap.first-name=${TEST_USER_FIRST_NAME:Test}
+test-user.bootstrap.last-name=${TEST_USER_LAST_NAME:User}
