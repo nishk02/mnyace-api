@@ -284,6 +284,7 @@ Derived from: Cash Flow screens (pages 30–36), Excel monthly sheets
 | `toAccountId` | UUID | FK to Account — nullable, used for TRANSFER between accounts |
 | `toGoalId` | UUID | FK to Goal — nullable, used for TRANSFER *arriving* at a goal. Never set alongside a `transaction_goal_allocations` row — see §3.8a. |
 | `amount` | BigDecimal | Always stored as positive. Sign derived from type at read time. |
+| `goalCreditApplied` | BigDecimal | *(added v1.5.0)* Nullable — only set for a TRANSFER with `toGoalId`. How much of `amount` actually landed on the goal's `currentProgress`, after BR-23's headroom clamp. Serialized on `TransactionResponse` — see BR-23. |
 | `notes` | String | Description, set at creation. Editable via `PUT` for all types except `SETTLEMENT` — see BR-11. |
 | `financialYear` | String | e.g. `FY24-25` — derived server-side from `date`, not user input. See "Two calendars" below. |
 | `month` | Integer | 1–12, where 1=April, 12=March — derived server-side. See "Two calendars" below. |
@@ -881,7 +882,7 @@ Every API response uses this wrapper — success or failure.
   "timestamp": "2024-06-14T09:41:00"
 }
 ```
-Both `warning` and `info` are omitted (`@JsonInclude NON_NULL`) whenever null — shown here only to name them together. They're deliberately separate fields, not one shared slot, because they mean different things to a frontend: `warning` is cautionary, worth surfacing prominently since there may be something to act on (e.g. BR-13's backdating notice). `info` is a neutral-to-positive side-effect notification with nothing to act on (e.g. BR-19/BR-20 releasing a no-longer-needed goal allocation back to free balance). A single response can carry both at once — e.g. a backdated edit that also happens to release an allocation — which is exactly why they're independent.
+Both `warning` and `info` are omitted (`@JsonInclude NON_NULL`) whenever null — shown here only to name them together. They're deliberately separate fields, not one shared slot, because they mean different things to a frontend: `warning` is cautionary, worth surfacing prominently since there may be something to act on (e.g. BR-13's backdating notice). `info` is a neutral-to-positive side-effect notification with nothing to act on (e.g. BR-19/BR-20 releasing a no-longer-needed goal allocation back to free balance, or BR-23 capping a transfer's goal credit at the goal's remaining headroom). A single response can carry both at once — e.g. a backdated edit that also happens to release an allocation — which is exactly why they're independent.
 
 **Error:**
 ```json
@@ -1884,7 +1885,11 @@ The two start out equal on a freshly created goal and diverge the moment any pro
 ### BR-23: Goal Progress Never Exceeds Target on Credit *(added v1.5.0)*
 A TRANSFER arriving into a goal via `toGoalId` already clamped its credit to the destination account's free balance (BR-19), but not to the goal's own remaining headroom — a transfer larger than what's left to reach `targetAmount` could push `currentProgress` past `targetAmount`, undermining BR-19's own earmark invariant from the other direction.
 
-**Fix:** the credit applied to the goal is now `min(transferAmount, freeBalance, remainingHeadroom)`, where `remainingHeadroom = targetAmount - currentProgress` (floored at `0`). The clamp is non-blocking, matching the existing free-balance clamp's shape — the TRANSFER itself still moves the full `transactionAmount` between the two accounts; only how much of it is credited toward the goal is capped. The difference is visible via `transaction.goalCreditApplied`, which can therefore be less than `transaction.amount`.
+**Fix:** the credit applied to the goal is now `min(transferAmount, freeBalance, remainingHeadroom)`, where `remainingHeadroom = targetAmount - currentProgress` (floored at `0`). The clamp is non-blocking, matching the existing free-balance clamp's shape — the TRANSFER itself still moves the full `transactionAmount` between the two accounts; only how much of it is credited toward the goal is capped. The difference is tracked via `transaction.goalCreditApplied`, which can therefore be less than `transaction.amount`.
+
+**`goalCreditApplied` is now actually serialized (gap closed same v1.5.0).** The field above was computed and persisted on the entity from the moment BR-23 shipped, but `TransactionResponse` never mapped it — a client had no way to tell a fully-credited cross-account transfer apart from a headroom-capped one, since both looked identical in the API response (same `amount`, nothing else to compare). `goalCreditApplied` is now a field on `TransactionResponse` itself (nullable; only meaningful for a TRANSFER with `toGoalId`), so this is finally checkable without inspecting the database directly.
+
+**A capped credit also surfaces a one-time `info` message**, the same `info` field §6's response envelope already carries for BR-19/BR-20's allocation-release notices — e.g. *"'Laptop Fund' only needed ₹1000 more to reach its target — the remaining ₹2000 was added to Bank of India's balance instead."* Set in `applyGoalProgress` whenever `goalCreditApplied < amount`, and returned on both `POST /transactions` and `PUT /transactions/{id}` (merged with `PUT`'s own BR-19 allocation-release info, which takes priority on the rare overlap where both fire on the same edit). Like every other `info`/`warning`, it's a one-time notice on the mutating response itself — re-fetching the transaction later via `GET /transactions` shows `goalCreditApplied` (it's persisted) but not the message (it isn't).
 
 
 ### BR-24: Goal List Filtering & Ongoing/Upcoming Ordering *(added v1.5.0)*
