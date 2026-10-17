@@ -27,11 +27,13 @@ public interface TransactionGoalAllocationRepository extends JpaRepository<Trans
             "WHERE a.transaction.user.id = :userId " +
             "AND a.transaction.calendarYear = :year " +
             "AND a.transaction.calendarMonth = :month " +
-            "AND a.goal.status != 'COMPLETED'")
+            "AND a.goal.status != 'COMPLETED' " +
+            "AND a.goal.startDate <= :today")
     BigDecimal sumByUserIdAndCalendarMonth(
             @Param("userId") String userId,
             @Param("year") int year,
-            @Param("month") int month);
+            @Param("month") int month,
+            @Param("today") LocalDate today);
 
     @Query("SELECT COALESCE(SUM(a.amount), 0) FROM TransactionGoalAllocation a " +
             "WHERE a.goal.id = :goalId " +

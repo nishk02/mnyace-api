@@ -5,6 +5,7 @@ import com.moneyflow.goal.Goal;
 import com.moneyflow.goal.GoalRepository;
 import com.moneyflow.shared.exception.ApiErrorCodes;
 import com.moneyflow.shared.exception.ApiException;
+import com.moneyflow.shared.util.AppClock;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -186,7 +187,7 @@ public class GoalAllocationService {
     }
 
     public BigDecimal sumWithdrawalsByCalendarMonth(String userId, int year, int month) {
-        BigDecimal result = allocationRepository.sumByUserIdAndCalendarMonth(userId, year, month);
+        BigDecimal result = allocationRepository.sumByUserIdAndCalendarMonth(userId, year, month, AppClock.today());
         return result != null ? result : BigDecimal.ZERO;
     }
 

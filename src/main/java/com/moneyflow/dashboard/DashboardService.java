@@ -68,10 +68,13 @@ public class DashboardService {
                 .map(Account::getCurrentBalance)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        BigDecimal monthlyTarget = activeGoals.stream()
+        List<GoalResponse> activeNonUpcomingGoals = activeGoals.stream()
                 .filter(g -> !"COMPLETED".equals(g.getStatus()))
                 .map(g -> GoalResponse.from(g, goalCreditService.creditedThisMonth(g)))
                 .filter(r -> !r.isUpcoming())
+                .toList();
+
+        BigDecimal monthlyTarget = activeNonUpcomingGoals.stream()
                 .map(GoalResponse::currentMonthlySavingsRequired)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
@@ -81,7 +84,8 @@ public class DashboardService {
                 .sumTransferToGoalByCalendarMonth(
                         userId,
                         now.getYear(),
-                        now.getMonthValue())).orElse(BigDecimal.ZERO);
+                        now.getMonthValue(),
+                        AppClock.today())).orElse(BigDecimal.ZERO);
 
         BigDecimal withdrawalsThisMonth = goalAllocationService
                 .sumWithdrawalsByCalendarMonth(userId, now.getYear(), now.getMonthValue());
@@ -112,7 +116,7 @@ public class DashboardService {
                 : null;
 
         // Savings message
-        String savingsMessage = buildSavingsMessage(savedThisMonth, monthlyTarget, totalBalance);
+        String savingsMessage = buildSavingsMessage(savedThisMonth, monthlyTarget, totalBalance, !activeNonUpcomingGoals.isEmpty());
 
         // Last entries
         List<Transaction> recentTransactions = transactionRepository
@@ -136,9 +140,7 @@ public class DashboardService {
                 goalsAdded);
 
         // Motivational quote
-        String quote = MOTIVATIONAL_QUOTES.get(
-                (int) (Math.abs(userId.hashCode())
-                        % MOTIVATIONAL_QUOTES.size()));
+        String quote = MOTIVATIONAL_QUOTES.get(Math.floorMod(userId.hashCode(), MOTIVATIONAL_QUOTES.size()));
 
         // Assemble response
         DashboardResponse.UserSummary userSummary =
@@ -163,9 +165,11 @@ public class DashboardService {
                 checklist);
     }
 
-    private String buildSavingsMessage(BigDecimal savedThisMonth, BigDecimal monthlyTarget, BigDecimal totalBalance) {
-        // No goals set
-        if (monthlyTarget.compareTo(BigDecimal.ZERO) == 0) {
+    private String buildSavingsMessage(
+            BigDecimal savedThisMonth, BigDecimal monthlyTarget, BigDecimal totalBalance, boolean hasActiveGoals) {
+        // No goal currently counts toward this month's target - distinct from monthlyTarget
+        // legitimately being 0 because an active goal already met its pace this month.
+        if (!hasActiveGoals) {
             return "Set a savings goal to get started!";
         }
 
