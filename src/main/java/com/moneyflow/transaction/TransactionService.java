@@ -179,7 +179,7 @@ public class TransactionService {
         Transaction saved = transactionRepository.save(transaction);
 
         // BR-07: update goal progress when TRANSFER targets a goal, or draws down goal(s) on withdrawal
-        applyGoalProgress(transaction, request.goalAllocations());
+        String goalCreditInfo = applyGoalProgress(transaction, request.goalAllocations());
 
         TransactionResponse response = TransactionResponse
                 .from(saved, goalAllocationService.getAllocationEntities(saved));
@@ -193,7 +193,7 @@ public class TransactionService {
                 "date - consider updating it if needed."
                 : null;
 
-        return new TransactionResult(response, warning, null);
+        return new TransactionResult(response, warning, goalCreditInfo);
     }
 
     @Transactional
@@ -263,11 +263,16 @@ public class TransactionService {
 
         Transaction saved = transactionRepository.save(transaction);
 
-        applyGoalProgress(saved, resolution.allocations());
+        String goalCreditInfo = applyGoalProgress(saved, resolution.allocations());
 
         TransactionResponse response = TransactionResponse.from(saved, goalAllocationService.getAllocationEntities(saved));
 
-        return new TransactionResult(response, dateWarning, resolution.droppedAllocationInfo());
+        // Two independent info sources can fire on the same edit (BR-19's allocation
+        // release, BR-23's headroom cap) - droppedAllocationInfo wins on the rare overlap,
+        // since a resupplied/released allocation is the more actionable of the two.
+        String info = resolution.droppedAllocationInfo() != null ? resolution.droppedAllocationInfo() : goalCreditInfo;
+
+        return new TransactionResult(response, dateWarning, info);
     }
 
     @Transactional
@@ -489,27 +494,39 @@ public class TransactionService {
         }
     }
 
-    private void applyGoalProgress(Transaction transaction, List<GoalAllocationItem> goalAllocations) {
+    private String applyGoalProgress(Transaction transaction, List<GoalAllocationItem> goalAllocations) {
+        String creditInfo = null;
         if (transaction.getType() == TransactionType.TRANSFER && transaction.getToGoalId() != null) {
-            goalRepository.findByIdAndUserId(transaction.getToGoalId(), transaction.getUser().getId())
-                    .ifPresent(goal -> {
-                        BigDecimal freeBalanceAfterDeposit = goalAllocationService.getFreeBalance(goal.getAccount());
-                        // Also clamp to remaining headroom under the goal's own target - the
-                        // TRANSFER still moves in full, only the credit to the goal is capped.
-                        BigDecimal remainingHeadroom = goal.getTargetAmount()
-                                .subtract(goal.getCurrentProgress()).max(BigDecimal.ZERO);
-                        BigDecimal creditToGoal = transaction.getAmount()
-                                .min(freeBalanceAfterDeposit.max(BigDecimal.ZERO))
-                                .min(remainingHeadroom);
+            Optional<Goal> goalOpt = goalRepository.findByIdAndUserId(transaction.getToGoalId(), transaction.getUser().getId());
+            if (goalOpt.isPresent()) {
+                Goal goal = goalOpt.get();
+                BigDecimal freeBalanceAfterDeposit = goalAllocationService.getFreeBalance(goal.getAccount());
+                // Also clamp to remaining headroom under the goal's own target - the
+                // TRANSFER still moves in full, only the credit to the goal is capped.
+                BigDecimal remainingHeadroom = goal.getTargetAmount()
+                        .subtract(goal.getCurrentProgress()).max(BigDecimal.ZERO);
+                BigDecimal creditToGoal = transaction.getAmount()
+                        .min(freeBalanceAfterDeposit.max(BigDecimal.ZERO))
+                        .min(remainingHeadroom);
 
-                        goal.setCurrentProgress(goal.getCurrentProgress().add(creditToGoal));
-                        goalRepository.save(goal);
+                goal.setCurrentProgress(goal.getCurrentProgress().add(creditToGoal));
+                goalRepository.save(goal);
 
-                        transaction.setGoalCreditApplied(creditToGoal);
-                    });
+                transaction.setGoalCreditApplied(creditToGoal);
+
+                // Surface the gap this transaction leaves uncredited - without this,
+                // the client has no way to know part of the transfer landed as plain balance.
+                if (creditToGoal.compareTo(transaction.getAmount()) < 0) {
+                    BigDecimal uncredited = transaction.getAmount().subtract(creditToGoal);
+                    creditInfo = "'" + goal.getName() + "' only needed ₹" + formatAmount(creditToGoal) +
+                            " more to reach its target — the remaining ₹" + formatAmount(uncredited) +
+                            " was added to " + goal.getAccount().getName() + "'s balance instead.";
+                }
+            }
         }
 
         goalAllocationService.applyAllocations(transaction, goalAllocations, GoalAllocationDirection.DECREASE);
+        return creditInfo;
     }
 
     private void reverseGoalProgress(Transaction transaction) {
