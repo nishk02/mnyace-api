@@ -11,7 +11,8 @@ http:
     data: |-
       {
         "email": "{{EMAIL}}",
-        "password": "{{PWD}}"
+        "password": "{{PWD}}",
+        "deviceLabel": "API Client"
       }
   auth: inherit
 
@@ -19,9 +20,11 @@ runtime:
   scripts:
     - type: after-response
       code: |-
-        if (res.body.success && res.body.data && res.body.data.token) {
-          const token = res.body.data.token;
-          bru.setEnvVar("AUTH_TOKEN", token);
+        if (res.body.success && res.body.data) {
+          const { token, refreshToken } = res.body.data;
+
+          if (token) bru.setEnvVar("AUTH_TOKEN", token);
+          if (refreshToken) bru.setEnvVar("REFRESH_TOKEN", refreshToken);
         }
 
 settings:

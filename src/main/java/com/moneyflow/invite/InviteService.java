@@ -1,8 +1,6 @@
 package com.moneyflow.invite;
 
-import com.moneyflow.auth.AuthResponse;
-import com.moneyflow.auth.User;
-import com.moneyflow.auth.UserRepository;
+import com.moneyflow.auth.*;
 import com.moneyflow.shared.email.EmailService;
 import com.moneyflow.shared.exception.ApiException;
 import com.moneyflow.shared.security.JwtUtil;
@@ -30,6 +28,7 @@ public class InviteService {
     private final EmailService emailService;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final RefreshTokenService refreshTokenService;
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Value("${app.max-users:50}")
@@ -128,8 +127,10 @@ public class InviteService {
         invite.setOtpCodeHash(null);
         inviteRepository.save(invite);
 
-        String jwt = jwtUtil.generateToken(savedUser.getId(), savedUser.getEmail(), savedUser.getRole());
-        return new AuthResponse(jwt, AuthResponse.UserSummary.from(savedUser));
+        String accessToken = jwtUtil.generateToken(savedUser.getId(), savedUser.getEmail(), savedUser.getRole());
+        RefreshTokenIssuer.IssuedRefreshToken refreshToken = refreshTokenService.issueNewFamily(savedUser, null);
+
+        return new AuthResponse(accessToken, refreshToken.rawToken(), AuthResponse.UserSummary.from(savedUser));
     }
 
     /**

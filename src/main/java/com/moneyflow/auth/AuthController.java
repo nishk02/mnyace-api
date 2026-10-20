@@ -23,4 +23,22 @@ public class AuthController {
 
         return ResponseEntity.ok(ApiResponse.success(response, "Signed in successfully"));
     }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<ApiResponse<AuthResponse>> refresh(
+            @Valid @RequestBody RefreshRequest request
+    ) {
+        AuthResponse response = authService.refresh(request);
+
+        return ResponseEntity.ok(ApiResponse.success(response, "Token refreshed successfully"));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<Void>> logout(
+            @Valid @RequestBody LogoutRequest request
+    ) {
+        authService.logout(request);
+
+        return ResponseEntity.ok(ApiResponse.success(null, "Logged out successfully"));
+    }
 }

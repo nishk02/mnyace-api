@@ -2,6 +2,7 @@ package com.moneyflow.auth;
 
 public record AuthResponse(
         String token,
+        String refreshToken,
         UserSummary user
 ) {
     public record UserSummary(

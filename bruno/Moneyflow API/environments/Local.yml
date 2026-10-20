@@ -14,3 +14,5 @@ variables:
     name: EMAIL
   - secret: true
     name: PWD
+  - name: REFRESH_TOKEN
+    value: HuOsLRzjyxDm6bJb6S2ZMs-nyzanVzxYMsu28YU3De4
