@@ -484,6 +484,25 @@ See BR-18 for the full onboarding/OTP business rules.
 
 ---
 
+### 3.12 RefreshToken
+
+One row per login/device, not per user — a `User` can hold several active `RefreshToken`s at once, one per signed-in device. Never the raw opaque token itself, only its SHA-256 hash: rotation and reuse-detection only ever need an exact-match lookup, and a 256-bit random token's entropy already makes brute-forcing infeasible regardless of hash speed, so there's no case for BCrypt's deliberate slowness here the way there is for `User.passwordHash`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUID | Primary key |
+| `userId` | UUID | FK to User |
+| `tokenHash` | String | SHA-256 hex of the raw opaque token, unique, immutable |
+| `familyId` | String | Shared across one rotation chain (one login/device) — see BR-26 |
+| `deviceLabel` | String | Optional, client-supplied at sign-in; `null` if omitted |
+| `expiresAt` | LocalDateTime | 30 days from issue, immutable |
+| `revokedAt` | LocalDateTime | `null` while active; set on rotation, logout, or reuse-detected cascade — never hard-deleted, see BR-26 |
+| `createdAt` | LocalDateTime | |
+
+See BR-26 for the full rotation and reuse-detection rule set.
+
+---
+
 ## 4. Database Schema (SQLite)
 
 ### SQLite type notes:
@@ -530,6 +549,23 @@ CREATE TABLE invites (
     created_at             TIMESTAMP NOT NULL,
     updated_at             TIMESTAMP NOT NULL
 );
+
+-- ============================================================
+-- REFRESH TOKENS (rotation + reuse detection — see spec §3.12, BR-26)
+-- ============================================================
+CREATE TABLE refresh_tokens (
+    id            TEXT      NOT NULL PRIMARY KEY,
+    user_id       TEXT      NOT NULL REFERENCES users(id),
+    token_hash    TEXT      NOT NULL UNIQUE,
+    family_id     TEXT      NOT NULL,
+    device_label  TEXT,
+    expires_at    TIMESTAMP NOT NULL,
+    revoked_at    TIMESTAMP,
+    created_at    TIMESTAMP NOT NULL
+);
+
+CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
+CREATE INDEX idx_refresh_tokens_family ON refresh_tokens(family_id);
 
 -- ============================================================
 -- USER PROFILES (preferences only)
@@ -747,13 +783,20 @@ CREATE INDEX idx_month_summaries_lookup
 ```
 com.moneyflow
 ├── auth/
-│   ├── AuthController.java           signin only — see invite/ for onboarding
+│   ├── AuthController.java           signin, refresh, logout — see invite/ for onboarding
 │   ├── AuthService.java
 │   ├── AdminBootstrapRunner.java     Seeds the first ADMIN from env vars at startup
-│   ├── SignInRequest.java
-│   ├── AuthResponse.java
+│   ├── RefreshTokenService.java      Thin orchestrator — hash, dispatch to Revoker/Issuer, nothing @Transactional
+│   ├── RefreshTokenRevoker.java      Reuse-detection check + rotation, own transaction boundary — see BR-26
+│   ├── RefreshTokenIssuer.java       Mints a new RefreshToken row — shared by sign-in and rotation
+│   ├── RefreshTokenRepository.java
+│   ├── SignInRequest.java            +deviceLabel (optional)
+│   ├── RefreshRequest.java
+│   ├── LogoutRequest.java
+│   ├── AuthResponse.java             +refreshToken
 │   ├── UserRepository.java
-│   └── User.java                     @Entity
+│   ├── User.java                     @Entity
+│   └── RefreshToken.java             @Entity — see §3.12
 │
 ├── invite/                           Invite-only onboarding (replaces open signup, v1.4.0)
 │   ├── AdminInviteController.java    POST /api/admin/invites — JWT + ADMIN only
@@ -928,10 +971,42 @@ Self-registration is invite-only — there is no public "create an account" endp
 
 #### POST /auth/signin
 ```json
-{ "email": "nishant@example.com", "password": "SecurePass123!" }
+{ "email": "nishant@example.com", "password": "SecurePass123!", "deviceLabel": "iPhone 15" }
 ```
+`deviceLabel` is optional — free text, client-supplied, purely cosmetic (a future "active sessions" screen would display it; nothing in rotation or reuse-detection keys off it). Omitted or blank is fine; the `RefreshToken` row is simply created with `deviceLabel = null`.
+
 **Response 200:** same shape as the invite `verify-otp` response below
+```json
+{
+  "data": {
+    "token": "eyJhbGci...",
+    "refreshToken": "aG3-t-xQC1_TP-TEIBbOkKNu3Gh8ead9JI8X5YmZsgA",
+    "user": { "id": "uuid", "firstName": "Nishant", "lastName": "Kumar", "email": "nishant@example.com", "onboardingStep": 0 }
+  }
+}
+```
 **401:** `INVALID_CREDENTIALS` — returned identically whether the email doesn't exist or the password is wrong. This is deliberate: a login endpoint that distinguishes "no such user" from "wrong password" via status code or message lets an anonymous caller enumerate registered emails. Both failure modes must be indistinguishable to the caller.
+
+---
+
+#### POST /auth/refresh
+```json
+{ "refreshToken": "aG3-t-xQC1_TP-TEIBbOkKNu3Gh8ead9JI8X5YmZsgA" }
+```
+Rotates the presented `refreshToken`: the old one is revoked, a new one is issued in its place (same `familyId`), and a fresh `token` (JWT, 15-minute lifetime) is returned alongside it. See BR-26 for the full rotation and reuse-detection design.
+
+**Response 200:** same shape as `/auth/signin`
+**401:** `UNAUTHORIZED`, message "Session expired. Please sign in again." — returned identically whether the token doesn't exist, has expired, or was already used once before (reuse detected). As with `/auth/signin`'s generic `401`, these three causes are deliberately indistinguishable to the caller; see BR-26.
+
+---
+
+#### POST /auth/logout
+```json
+{ "refreshToken": "aG3-t-xQC1_TP-TEIBbOkKNu3Gh8ead9JI8X5YmZsgA" }
+```
+Revokes every active `RefreshToken` sharing the presented token's `familyId` — i.e. logs out that one device, not every device the user is signed into elsewhere. The JWT itself isn't and can't be revoked (it's self-describing and stateless); it simply expires naturally within its own 15-minute lifetime, by which point no refresh is possible to extend the session further.
+
+**Response 200:** `{ "message": "Logged out successfully" }`
 
 ---
 
@@ -1002,6 +1077,7 @@ The invited person's first step after opening the emailed link — stages their 
 {
   "data": {
     "token": "eyJhbGci...",
+    "refreshToken": "aG3-t-xQC1_TP-TEIBbOkKNu3Gh8ead9JI8X5YmZsgA",
     "user": { "id": "uuid", "firstName": "Nishant", "lastName": "Kumar", "email": "newmember@example.com", "onboardingStep": 0 }
   }
 }
@@ -1915,6 +1991,27 @@ This isn't a one-time correction baked into a single read — `monthsRemaining` 
 **`isBehindSchedule`** = `!isUpcoming && plannedMonthlySavings > 0 && currentMonthlySavingsRequired > plannedMonthlySavings` — true once the live pace needed has risen past the original frozen plan, i.e. real time (or a target/date edit) has outpaced what was committed to at creation. A freshly created or not-yet-started goal can never read `true`: on creation `plannedMonthlySavings` and `currentMonthlySavingsRequired` are computed from the same inputs and start out numerically equal, and `isUpcoming` separately guards the not-yet-started case. Computed server-side rather than left to the frontend, specifically so a future server-side notification/scan can read it without the client having already fetched the goal.
 
 **`AppClock`** (`shared/util/AppClock`, pinned to `Asia/Kolkata`) replaces every ad hoc `LocalDate.now()` across the app (goal, transaction, dashboard, and analytics modules) as the single source of "today." Moneyflow is a single-user, India-only app, so the correct behaviour is "today in India," not "today on whatever timezone the server's host or JVM happens to be running in" — a server deployed on a UTC host would otherwise compute goal month-boundaries, `isUpcoming`, and `isBehindSchedule` up to a day off from the user's own calendar. Mirrors the existing `FinancialYearUtil` utility-class pattern (private constructor, static methods, same package).
+
+### BR-26: Refresh Token Rotation, Reuse Detection & Multi-Device Sessions
+
+A `RefreshToken` is opaque (32 random bytes, URL-safe base64) and never a JWT — a JWT's self-describing nature is the wrong shape for something whose entire job is revocability. Only its SHA-256 hash is ever stored (`tokenHash`); the raw value is returned once, in the sign-in/refresh response body, and never persisted anywhere server-side.
+
+**Every sign-in starts a new `familyId`, and every device gets its own.** One `RefreshToken` row exists per login/device, all sharing the same `userId` but each login starting a distinct `familyId` — this is what lets reuse-detection revoke *one* compromised device chain without touching a user's other active sessions elsewhere.
+
+**Rotation is one-shot and chained, not reusable:** every `POST /auth/refresh` call revokes the presented token and issues a brand-new one in the same `familyId` (`RefreshTokenRevoker.rotateValid`). The old token's `revokedAt` is set the instant the new one is issued — there is never a window where both the old and new tokens are simultaneously valid.
+
+**Reuse detection is the actual security mechanism, not an afterthought:** presenting a token that's already been revoked (`RefreshTokenRevoker.checkAndHandleReuse`) is treated as a signal that the token was stolen and used by someone else after the legitimate client already rotated past it — the *only* other way a revoked token could resurface. The response is to revoke every other token still active in that same `familyId`, killing the whole chain, not just the one token presented — an attacker and the legitimate client racing to use the same stolen token both end up locked out, forcing a fresh sign-in.
+
+**Revoked tokens are never hard-deleted.** Reuse detection depends on being able to tell "this token never existed" apart from "this token existed but was already used" — a hard delete would make the two indistinguishable and silently disable the entire mechanism. The row stays, with `revokedAt` set, as the record reuse-detection reads from. (A time-bounded cleanup job for old revoked/expired rows, and a future "active sessions" screen built from this same table, are both reasonable later additions — neither is needed at this app's scale today.)
+
+**Why the revoke-then-throw design needed its own transaction boundary, not just its own method:** the naive version — one `@Transactional` method that revokes on reuse-detection and then throws — silently lost the revoke, because Spring's default behaviour rolls back an entire method's writes when it throws an unchecked exception, including writes that happened earlier in the same method. The fix is structural, not cosmetic: `checkAndHandleReuse` (the revoke) and the method that eventually throws (`RefreshTokenService.rotate`) must live far enough apart — a genuinely separate bean (`RefreshTokenRevoker`), called by a method (`rotate`) that carries no `@Transactional` of its own anywhere in its *own* call chain — that the revoke's transaction can commit independently before anything downstream throws. The same reasoning is why `AuthService.refresh()` deliberately carries no `@Transactional`: annotating it would silently fold `RefreshTokenRevoker`'s "independent" transaction back into `refresh()`'s own, since Spring's default propagation joins an already-open transaction rather than starting a new one — reintroducing the exact bug the separate bean was built to avoid, just one call-frame higher.
+
+**`RefreshTokenIssuer.issue()` always resolves the `User` association before returning it**, via `Hibernate.initialize(user)`, rather than relying on something downstream to touch a getter. A lazy `@ManyToOne` proxy only resolves when a field getter is actually called on it — merely passing the reference through a method or a record never triggers that — so without this, `AuthService.refresh()` reading `rotated.user().getEmail()` after `RefreshTokenRevoker`'s transaction had already closed would throw `LazyInitializationException`.
+
+**`/auth/logout` revokes by `familyId`, the same mechanism reuse-detection uses** — `RefreshTokenService.revokeFamilyOf`, not a bulk SQL `UPDATE`. An `@Modifying` JPQL bulk update proved unreliable against this app's SQLite + HikariCP + Hibernate combination in practice — it would report rows affected without the write durably persisting — so every revoke path in this module (rotation's cascade, logout, and the admin-facing `revokeAllForUser`) fetches the affected rows as managed entities and saves them individually instead, the same write path every other entity in this app already relies on.
+
+**Lifetimes:** the JWT (`token`) is short-lived (`jwt.expiration-ms`, currently 15 minutes) and carries no revocation mechanism of its own — it's meant to expire naturally and get replaced via rotation, not be individually revocable. The `RefreshToken` is long-lived (`refresh-token.expiration-days`, currently 30 days) and *is* individually revocable, which is the entire point of separating the two: a stolen JWT self-heals within minutes regardless of any other defense; a stolen `RefreshToken` is the one that actually needs active revocation.
+
 ## 10. Screens-to-API Mapping
 
 | Screen (Figma page) | API calls made |
