@@ -30,8 +30,11 @@ public class AuthService {
         return new AuthResponse(accessToken, refreshToken.rawToken(), AuthResponse.UserSummary.from(user));
     }
 
-    public AuthResponse refresh(RefreshRequest request) {
-        RefreshTokenIssuer.IssuedRefreshToken rotated = refreshTokenService.rotate(request.refreshToken());
+    public AuthResponse refresh(String presentedRawToken) {
+        if (presentedRawToken == null || presentedRawToken.isBlank()) {
+            throw ApiException.unauthorized("Session expired. Please sign in again.");
+        }
+        RefreshTokenIssuer.IssuedRefreshToken rotated = refreshTokenService.rotate(presentedRawToken);
         User user = rotated.user();
 
         String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole());
@@ -40,7 +43,10 @@ public class AuthService {
     }
 
     @Transactional
-    public void logout(LogoutRequest request) {
-        refreshTokenService.revokeFamilyOf(request.refreshToken());
+    public void logout(String presentedRawToken) {
+        if (presentedRawToken == null || presentedRawToken.isBlank()) {
+            throw ApiException.unauthorized("Session expired. Please sign in again.");
+        }
+        refreshTokenService.revokeFamilyOf(presentedRawToken);
     }
 }
