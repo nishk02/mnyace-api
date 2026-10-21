@@ -141,6 +141,7 @@ jobs:
             echo "MAIL_PASSWORD=${MAIL_PASSWORD}" >> .env
             echo "MAIL_FROM=${MAIL_FROM}" >> .env
             echo "INVITE_SIGNUP_URL=${INVITE_SIGNUP_URL}" >> .env
+            chmod 600 .env
             docker compose pull
             docker compose up -d
             docker image prune -f
