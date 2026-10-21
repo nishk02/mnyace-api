@@ -2,17 +2,25 @@ name: Local
 variables:
   - name: BASE_URL
     value: http://localhost:8080
+    description: ""
   - secret: true
     name: AUTH_TOKEN
+    description: ""
   - secret: true
     name: INVITE_TOKEN
+    description: ""
   - secret: true
     name: _EMAIL
+    description: ""
   - secret: true
     name: _PWD
+    description: ""
   - secret: true
     name: EMAIL
+    description: ""
   - secret: true
     name: PWD
-  - name: REFRESH_TOKEN
-    value: HuOsLRzjyxDm6bJb6S2ZMs-nyzanVzxYMsu28YU3De4
+    description: ""
+  - secret: true
+    name: REFRESH_TOKEN
+    description: ""
