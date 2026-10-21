@@ -1,7 +1,7 @@
 # Moneyflow — Domain Model & API Contract Specification
 **Version:** 1.5.0  
 **Derived from:** Figma screens (39 pages), Excel cashflow template (FY24-25), User journey map  
-**Purpose:** Complete build specification before writing any Java code  
+**Purpose:** Complete build specification, revised alongside the Java code as it's built  
 **Architecture:** Modular monolith · Spring Boot 3 · SQLite · Financial year April–March
 
 ### Changelog
@@ -975,7 +975,9 @@ Self-registration is invite-only — there is no public "create an account" endp
 ```
 `deviceLabel` is optional — free text, client-supplied, purely cosmetic (a future "active sessions" screen would display it; nothing in rotation or reuse-detection keys off it). Omitted or blank is fine; the `RefreshToken` row is simply created with `deviceLabel = null`.
 
-**Response 200:** same shape as the invite `verify-otp` response below
+Request header `X-Client-Platform: web` switches this endpoint (and `/auth/refresh`, `/auth/logout`, `/auth/invites/{token}/verify-otp`) into cookie mode. Absent, or any value other than `web`, is today's unchanged native/body behaviour. See BR-26 for why this split exists and why `web` is the only value that matters.
+
+**Response 200 (native — header absent/non-`web`):** same shape as the invite `verify-otp` response below
 ```json
 {
   "data": {
@@ -985,28 +987,46 @@ Self-registration is invite-only — there is no public "create an account" endp
   }
 }
 ```
+**Response 200 (web — `X-Client-Platform: web`):** `refreshToken` is omitted from the body (`@JsonInclude NON_NULL`) and instead set as a cookie:
+```json
+{
+  "data": {
+    "token": "eyJhbGci...",
+    "user": { "id": "uuid", "firstName": "Nishant", "lastName": "Kumar", "email": "nishant@example.com", "onboardingStep": 0 }
+  }
+}
+```
+```
+Set-Cookie: refreshToken=aG3-t-xQC1_TP-TEIBbOkKNu3Gh8ead9JI8X5YmZsgA; Path=/auth; Max-Age=2592000; HttpOnly; Secure; SameSite=Strict
+```
 **401:** `INVALID_CREDENTIALS` — returned identically whether the email doesn't exist or the password is wrong. This is deliberate: a login endpoint that distinguishes "no such user" from "wrong password" via status code or message lets an anonymous caller enumerate registered emails. Both failure modes must be indistinguishable to the caller.
 
 ---
 
 #### POST /auth/refresh
+**Native (header absent/non-`web`):** `refreshToken` comes from the request body
 ```json
 { "refreshToken": "aG3-t-xQC1_TP-TEIBbOkKNu3Gh8ead9JI8X5YmZsgA" }
 ```
+**Web (`X-Client-Platform: web`):** no body needed — `refreshToken` comes from the `refreshToken` cookie set by `/auth/signin` instead. A body is still accepted but ignored when the cookie is present.
+
 Rotates the presented `refreshToken`: the old one is revoked, a new one is issued in its place (same `familyId`), and a fresh `token` (JWT, 15-minute lifetime) is returned alongside it. See BR-26 for the full rotation and reuse-detection design.
 
-**Response 200:** same shape as `/auth/signin`
+**Response 200:** same shape as `/auth/signin` (native body, or web omitted-body + re-issued `Set-Cookie`, per the same platform header)
 **401:** `UNAUTHORIZED`, message "Session expired. Please sign in again." — returned identically whether the token doesn't exist, has expired, or was already used once before (reuse detected). As with `/auth/signin`'s generic `401`, these three causes are deliberately indistinguishable to the caller; see BR-26.
 
 ---
 
 #### POST /auth/logout
+**Native (header absent/non-`web`):** `refreshToken` comes from the request body
 ```json
 { "refreshToken": "aG3-t-xQC1_TP-TEIBbOkKNu3Gh8ead9JI8X5YmZsgA" }
 ```
+**Web (`X-Client-Platform: web`):** no body needed — `refreshToken` comes from the cookie. The response additionally clears it (`Max-Age=0`) so a stale cookie can't be replayed after logout.
+
 Revokes every active `RefreshToken` sharing the presented token's `familyId` — i.e. logs out that one device, not every device the user is signed into elsewhere. The JWT itself isn't and can't be revoked (it's self-describing and stateless); it simply expires naturally within its own 15-minute lifetime, by which point no refresh is possible to extend the session further.
 
-**Response 200:** `{ "message": "Logged out successfully" }`
+**Response 200:** `{ "message": "Logged out successfully" }` — web also carries `Set-Cookie: refreshToken=; Path=/auth; Max-Age=0; HttpOnly; Secure; SameSite=Strict`
 
 ---
 
@@ -1072,7 +1092,7 @@ The invited person's first step after opening the emailed link — stages their 
 ```json
 { "code": "482913" }
 ```
-**Response 200:** the `User` is created on success — same shape as `/auth/signin`
+**Response 200:** the `User` is created on success — same shape as `/auth/signin`, including the `X-Client-Platform: web` cookie split (omitted-body + `Set-Cookie` for web, body `refreshToken` for native)
 ```json
 {
   "data": {
@@ -2011,6 +2031,12 @@ A `RefreshToken` is opaque (32 random bytes, URL-safe base64) and never a JWT �
 **`/auth/logout` revokes by `familyId`, the same mechanism reuse-detection uses** — `RefreshTokenService.revokeFamilyOf`, not a bulk SQL `UPDATE`. An `@Modifying` JPQL bulk update proved unreliable against this app's SQLite + HikariCP + Hibernate combination in practice — it would report rows affected without the write durably persisting — so every revoke path in this module (rotation's cascade, logout, and the admin-facing `revokeAllForUser`) fetches the affected rows as managed entities and saves them individually instead, the same write path every other entity in this app already relies on.
 
 **Lifetimes:** the JWT (`token`) is short-lived (`jwt.expiration-ms`, currently 15 minutes) and carries no revocation mechanism of its own — it's meant to expire naturally and get replaced via rotation, not be individually revocable. The `RefreshToken` is long-lived (`refresh-token.expiration-days`, currently 30 days) and *is* individually revocable, which is the entire point of separating the two: a stolen JWT self-heals within minutes regardless of any other defense; a stolen `RefreshToken` is the one that actually needs active revocation.
+
+**On the web/PWA target, the `RefreshToken` never touches JavaScript-reachable storage.** A native client has no equivalent to a browser's JS-reachable storage, so the raw token in the response body was always fine there — but a PWA with no secure native keychain would otherwise have to hold a 30-day bearer credential somewhere `localStorage`/`sessionStorage`-adjacent, which is also exactly where a successful XSS payload can read it. Moneyflow treats that as an unacceptable trade for a token whose entire blast radius, by design, is "full account access for 30 days." The fix is to never let the raw value reach app JS at all on web: the server sets it directly as an `HttpOnly; Secure; SameSite=Strict; Path=/auth` cookie, and the browser attaches it automatically on same-origin requests to `/auth/refresh` and `/auth/logout` without the client ever reading or storing it.
+
+**The split is driven by one request header, not a second code path per platform.** `AuthController`/`InviteSignupController` read `X-Client-Platform` and branch purely on whether it equals `"web"` (via the shared `RefreshTokenCookieWriter` component); absent or any other value (`"ios"`, `"android"`, omitted entirely) falls through to today's unchanged body-based behaviour, so native requires zero changes and zero awareness of the cookie path. All of this branching — reading the header, resolving incoming-token-from-cookie-vs-body, building/clearing the `Set-Cookie` header — lives exclusively in the controller layer. `AuthService`, `InviteService`, `RefreshTokenService`, `RefreshTokenRevoker`, and `RefreshTokenIssuer` take and return a plain raw token string exactly as before and have no idea a cookie exists; the entire feature is a transport-layer concern layered on top of an unchanged rotation/reuse-detection core.
+
+**No CSRF token scheme, and no CORS credential changes, were needed for this.** `SameSite=Strict` means the browser refuses to attach the cookie to any request that didn't originate from the app's own origin — including a form POST or `<img>`/`fetch` triggered from a malicious third-party page — which is exactly the attack a CSRF token would otherwise exist to block. This is sufficient specifically because `/auth/refresh` and `/auth/logout` are only ever called same-origin, by the app's own JS, against its own API on the same domain; there is no cross-site, cross-subdomain, or top-level-navigation flow anywhere in Moneyflow's design that a stricter `Lax`/`None` policy would have been needed to support. Likewise, every deployment target is same-origin (no separate API subdomain), so no `Access-Control-Allow-Credentials`/`withCredentials` wiring was needed either — `CorsConfig` only gained `X-Client-Platform` on its `allowedHeaders` list, for the header itself, not for the cookie.
 
 ## 10. Screens-to-API Mapping
 
