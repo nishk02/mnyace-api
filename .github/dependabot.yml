@@ -7,6 +7,12 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # Boot 4 is a planned migration (see .trivyignore), not a routine bump.
+      # Closing a Dependabot PR only skips that one version, so ignore the
+      # whole major line here. 3.5.x patch updates still come through.
+      - dependency-name: "org.springframework.boot:spring-boot-starter-parent"
+        update-types: [ "version-update:semver-major" ]
     groups:
       # jjwt-api / jjwt-impl / jjwt-jackson are one library split into three
       # modules that must stay on the same version - see explanation above.
