@@ -15,6 +15,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.HexFormat;
 import java.util.regex.Pattern;
 
 /**
@@ -159,9 +162,30 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private String resolveClientIp(HttpServletRequest request) {
         String forwardedFor = request.getHeader("X-Forwarded-For");
         if (forwardedFor != null && !forwardedFor.isBlank()) {
-            return forwardedFor.split(",")[0].trim();
+            return bucketKeyFor(forwardedFor.split(",")[0].trim());
         }
-        return request.getRemoteAddr();
+        return bucketKeyFor(request.getRemoteAddr());
+    }
+
+    /**
+     * An IPv6 subscriber is normally handed a whole /64, so keying on the full address would
+     * give one attacker billions of fresh buckets. IPv6 addresses are keyed on their /64 prefix;
+     * IPv4 (and anything unparseable) is used as-is.
+     */
+    static String bucketKeyFor(String ip) {
+        if (!ip.contains(":")) {
+            return ip;
+        }
+        try {
+            // A literal containing ':' is never resolved via DNS.
+            byte[] address = InetAddress.getByName(ip).getAddress();
+            if (address.length != 16) {
+                return InetAddress.getByAddress(address).getHostAddress(); // IPv4-mapped form
+            }
+            return HexFormat.of().formatHex(address, 0, 8) + "::/64";
+        } catch (UnknownHostException e) {
+            return ip;
+        }
     }
 
     private void rejectWithPayloadTooLarge(HttpServletResponse response) throws IOException {
