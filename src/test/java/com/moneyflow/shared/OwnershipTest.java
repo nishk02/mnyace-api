@@ -2,6 +2,7 @@ package com.moneyflow.shared;
 
 import com.moneyflow.auth.AuthIntegrationTestBase;
 import com.moneyflow.shared.email.EmailService;
+import com.moneyflow.shared.util.AppClock;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.mockito.ArgumentCaptor;
@@ -33,14 +34,16 @@ class OwnershipTest extends AuthIntegrationTestBase {
     private String goalA;
     private String transactionA;
     private boolean ready;
-    private final LocalDate today = LocalDate.now();
+    private final LocalDate today = AppClock.today();
 
     private void setUpUsersAndData() {
         if (ready) {
             return;
         }
-        authA = "Bearer " + accessTokenOf(signInAdmin("X-Forwarded-For", freshIp()));
-        authB = "Bearer " + registerMemberB();
+        if (authB == null) {
+            authA = "Bearer " + accessTokenOf(signInAdmin("X-Forwarded-For", freshIp()));
+            authB = "Bearer " + registerMemberB();
+        }
 
         accountA = idOf(post("/api/accounts",
                 "{\"name\":\"" + MARKER + "-account\",\"type\":\"BANK\",\"currentBalance\":1000}", "Authorization", authA));
