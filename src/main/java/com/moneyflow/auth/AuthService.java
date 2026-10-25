@@ -1,5 +1,6 @@
 package com.moneyflow.auth;
 
+import com.moneyflow.shared.util.EmailNormalizer;
 import com.moneyflow.shared.exception.ApiException;
 import com.moneyflow.shared.security.JwtUtil;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +25,7 @@ public class AuthService {
 
     @Transactional
     public AuthResponse signIn(SignInRequest request) {
-        Optional<User> userOpt = userRepository.findByEmail(request.email());
+        Optional<User> userOpt = userRepository.findByEmailIgnoreCase(EmailNormalizer.normalize(request.email()));
         boolean passwordMatches = passwordEncoder.matches(
                 request.password(),
                 userOpt.map(User::getPasswordHash).orElse(DUMMY_PASSWORD_HASH)

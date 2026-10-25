@@ -1,5 +1,6 @@
 package com.moneyflow.auth;
 
+import com.moneyflow.shared.util.EmailNormalizer;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,14 +40,14 @@ public class TestUserBootstrapRunner implements CommandLineRunner {
         if (email.isBlank() || password.isBlank()) {
             return; // not configured
         }
-        if (userRepository.existsByEmail(email)) {
+        if (userRepository.existsByEmailIgnoreCase(email)) {
             return; // already there - never duplicate or overwrite
         }
 
         User user = new User();
         user.setFirstName(firstName);
         user.setLastName(lastName);
-        user.setEmail(email);
+        user.setEmail(EmailNormalizer.normalize(email));
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setRole("MEMBER");
         userRepository.save(user);
