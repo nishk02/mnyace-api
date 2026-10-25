@@ -37,6 +37,20 @@ class InputBoundsTest extends AuthIntegrationTestBase {
     }
 
     @Test
+    void transactionNotes_over250Characters_areRejected() {
+        HttpResponse<String> response = createTransaction("n".repeat(251));
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        assertThat(json(response).path("error").path("message").asText()).contains("250");
+    }
+
+    @Test
+    void transactionNotes_of250Characters_passValidation() {
+        // fake ids: validation passes and the service answers 404, never a 400 about the notes
+        assertThat(createTransaction("n".repeat(250)).statusCode()).isNotEqualTo(400);
+    }
+
+    @Test
     void transactionList_capsThePageSize() {
         HttpResponse<String> response = get("/api/transactions?size=5000", "Authorization", auth);
 
@@ -57,6 +71,13 @@ class InputBoundsTest extends AuthIntegrationTestBase {
         HttpResponse<String> response = put("/api/goals/reorder", "{}", "Authorization", auth);
 
         assertThat(response.statusCode()).isEqualTo(400);
+    }
+
+    private HttpResponse<String> createTransaction(String notes) {
+        return post("/api/transactions",
+                "{\"date\":\"2026-01-15\",\"type\":\"VARIABLE_EXPENSE\",\"categoryId\":\"c\",\"accountId\":\"a\","
+                        + "\"amount\":10,\"notes\":\"" + notes + "\"}",
+                "Authorization", auth);
     }
 
     private HttpResponse<String> createAccount(String name, String balance) {

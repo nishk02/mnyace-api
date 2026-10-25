@@ -18,7 +18,7 @@ public record UpdateTransactionRequest(
         @Digits(integer = 13, fraction = 2, message = "Amount is too large or has more than 2 decimal places")
         BigDecimal amount,
 
-        @Size(max = 1000, message = "Notes must be at most 1000 characters")
+        @Size(max = 250, message = "Notes must be at most 250 characters")
         String notes,
 
         @Valid
