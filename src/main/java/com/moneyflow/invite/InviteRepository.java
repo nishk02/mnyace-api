@@ -11,10 +11,7 @@ import java.util.Optional;
 public interface InviteRepository extends JpaRepository<Invite, String> {
     Optional<Invite> findByToken(String token);
 
-    /**
-     * Atomically spends one OTP guess. Returns 0 when the invite has no guesses left, so
-     * parallel requests cannot all pass a read-then-write check and exceed the cap.
-     */
+    /** Atomically spends one OTP guess; returns 0 once none are left, so parallel requests can't exceed the cap. */
     @Transactional
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("update Invite i set i.otpAttempts = i.otpAttempts + 1 where i.id = :id and i.otpAttempts < :max")

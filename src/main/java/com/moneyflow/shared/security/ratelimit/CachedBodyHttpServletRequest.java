@@ -11,14 +11,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 
-/**
- * Wraps the request so its body can be read twice: once in RateLimitFilter
- * (to pull the email out for the per-email bucket), and once more,
- * normally, by Spring's @RequestBody binding in the controller.
- *
- * The body is capped at maxBytes: this runs before authentication, so an
- * unbounded read would let any anonymous caller exhaust the heap.
- */
+/** Lets the request body be read twice (filter, then controller), capped at maxBytes because it runs before authentication. */
 class CachedBodyHttpServletRequest extends HttpServletRequestWrapper {
     private final byte[] body;
 

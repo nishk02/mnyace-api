@@ -168,11 +168,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         return bucketKeyFor(request.getRemoteAddr());
     }
 
-    /**
-     * An IPv6 subscriber is normally handed a whole /64, so keying on the full address would
-     * give one attacker billions of fresh buckets. IPv6 addresses are keyed on their /64 prefix;
-     * IPv4 (and anything unparseable) is used as-is.
-     */
+    /** Keys IPv6 clients on their /64 prefix (one subscriber owns a whole /64); IPv4 and unparseable values are used as-is. */
     static String bucketKeyFor(String ip) {
         if (!ip.contains(":")) {
             return ip;

@@ -6,11 +6,7 @@ import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 
-/**
- * Refuses to boot prod with the committed dev JWT secret or a weak one. The dev default is a
- * fallback in application.properties, so a missing JWT_SECRET would otherwise silently leave
- * prod signing tokens with a key that is public in the repo.
- */
+/** Refuses to boot prod with the public dev JWT secret or a weak one. */
 @Component
 @Profile("prod")
 public class ProdSecretsGuard {
