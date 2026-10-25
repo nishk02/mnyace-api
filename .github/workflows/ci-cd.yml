@@ -155,4 +155,15 @@ jobs:
             chmod 600 .env
             docker compose pull
             docker compose up -d
+            # Caddy and Litestream read their mounted config only at startup, and
+            # `up -d` doesn't notice file changes. Apply each one when its content
+            # changed since the last deploy (Litestream restarts cost B2 list calls).
+            if [ "$(sha256sum < Caddyfile)" != "$(cat .caddyfile.sha 2>/dev/null)" ]; then
+              docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+              sha256sum < Caddyfile > .caddyfile.sha
+            fi
+            if [ "$(sha256sum < litestream.yml)" != "$(cat .litestream.sha 2>/dev/null)" ]; then
+              docker compose restart litestream
+              sha256sum < litestream.yml > .litestream.sha
+            fi
             docker image prune -f
