@@ -1,3 +1,14 @@
+# Compaction and cleanup make B2 list calls (free tier: 2,500 a day), and the
+# defaults exceed that. Slower intervals only delay tidying old files;
+# uploads (sync-interval) are free and unaffected.
+levels:
+  - interval: 1h
+  - interval: 6h
+  - interval: 24h
+
+l0-retention: 5m
+l0-retention-check-interval: 1h
+
 dbs:
   - path: /app/data/moneyflow.db
     replica:
