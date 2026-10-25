@@ -14,7 +14,7 @@ updates:
         patterns:
           - "io.jsonwebtoken:*"
 
-  # The base image tag referenced in DockerFile (eclipse-temurin:21-...).
+  # The base image tag referenced in Dockerfile (eclipse-temurin:21-...).
   # Does NOT see OS packages baked into that image (e.g. libssl3) - that
   # category only ever surfaces through Trivy's scan, never here.
   - package-ecosystem: "docker"

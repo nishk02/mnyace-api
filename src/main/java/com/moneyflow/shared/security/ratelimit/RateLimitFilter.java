@@ -15,9 +15,13 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
+import java.util.HexFormat;
+import java.util.regex.Pattern;
 
 /**
- * Rate-limits POST /auth/signin and POST /auth/refresh, ahead of
+ * Rate-limits POST /auth/signin, POST /auth/refresh and the invite POSTs, ahead of
  * JwtAuthFilter. These are permitAll (no JWT to gate them) — exactly why
  * they're worth protecting here: signin is the one place a password can be
  * guessed at all, and refresh is a DoS target because it does real work
@@ -32,20 +36,30 @@ import java.io.IOException;
  */
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
+    // The invite POSTs (signup, verify-otp, resend-otp) are public too; verify-otp is a guessable 6-digit code.
+    private static final Pattern INVITE_ACTION_PATH =
+            Pattern.compile("/auth/invites/[^/]+/(signup|verify-otp|resend-otp)");
+
+    // A signin body is an email, a password and an optional device label; anything near this is abuse.
+    private static final int MAX_SIGNIN_BODY_BYTES = 4096;
+
     private final RateLimiterService signinIpRateLimiter;
     private final RateLimiterService signinEmailRateLimiter;
     private final RateLimiterService refreshIpRateLimiter;
+    private final RateLimiterService inviteIpRateLimiter;
     private final ObjectMapper objectMapper;
 
     public RateLimitFilter(
             @Qualifier("signinIpRateLimiter") RateLimiterService signinIpRateLimiter,
             @Qualifier("signinEmailRateLimiter") RateLimiterService signinEmailRateLimiter,
             @Qualifier("refreshIpRateLimiter") RateLimiterService refreshIpRateLimiter,
+            @Qualifier("inviteIpRateLimiter") RateLimiterService inviteIpRateLimiter,
             ObjectMapper objectMapper
     ) {
         this.signinIpRateLimiter = signinIpRateLimiter;
         this.signinEmailRateLimiter = signinEmailRateLimiter;
         this.refreshIpRateLimiter = refreshIpRateLimiter;
+        this.inviteIpRateLimiter = inviteIpRateLimiter;
         this.objectMapper = objectMapper;
     }
 
@@ -55,15 +69,30 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @NonNull HttpServletResponse response,
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
-        boolean isSignin = isPost(request) && "/auth/signin".equals(request.getRequestURI());
-        boolean isRefresh = isPost(request) && "/auth/refresh".equals(request.getRequestURI());
+        // getServletPath(), not getRequestURI(): the latter is the raw, still-encoded path, so
+        // /auth/%73ignin would skip this filter yet be decoded and routed to /auth/signin.
+        String path = request.getServletPath();
+        boolean isSignin = isPost(request) && "/auth/signin".equals(path);
+        boolean isRefresh = isPost(request) && "/auth/refresh".equals(path);
 
-        if (!isSignin && !isRefresh) {
+        boolean isInviteAction = isPost(request) && INVITE_ACTION_PATH.matcher(path).matches();
+
+        if (!isSignin && !isRefresh && !isInviteAction) {
             filterChain.doFilter(request, response);
             return;
         }
 
         String clientIp = resolveClientIp(request);
+
+        if (isInviteAction) {
+            RateLimiterService.Decision decision = inviteIpRateLimiter.consume(clientIp);
+            if (!decision.allowed()) {
+                rejectWithTooManyRequests(response, decision.retryAfterSeconds());
+                return;
+            }
+            filterChain.doFilter(request, response);
+            return;
+        }
 
         if (isRefresh) {
             RateLimiterService.Decision decision = refreshIpRateLimiter.consume(clientIp);
@@ -75,14 +104,21 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        // isSignin: buffer the body so we can read the email for the
-        // per-email bucket, then still hand an intact, re-readable body
-        // down to the controller's @RequestBody binding.
-        CachedBodyHttpServletRequest cachedRequest = new CachedBodyHttpServletRequest(request);
-
+        // isSignin: charge the IP bucket first, so a flood of oversized bodies is throttled
+        // before any of them is read.
         RateLimiterService.Decision ipDecision = signinIpRateLimiter.consume(clientIp);
         if (!ipDecision.allowed()) {
             rejectWithTooManyRequests(response, ipDecision.retryAfterSeconds());
+            return;
+        }
+
+        // Then buffer the (size-capped) body so we can read the email for the per-email
+        // bucket, and still hand an intact, re-readable body to @RequestBody binding.
+        CachedBodyHttpServletRequest cachedRequest;
+        try {
+            cachedRequest = new CachedBodyHttpServletRequest(request, MAX_SIGNIN_BODY_BYTES);
+        } catch (CachedBodyHttpServletRequest.BodyTooLargeException e) {
+            rejectWithPayloadTooLarge(response);
             return;
         }
 
@@ -126,9 +162,38 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private String resolveClientIp(HttpServletRequest request) {
         String forwardedFor = request.getHeader("X-Forwarded-For");
         if (forwardedFor != null && !forwardedFor.isBlank()) {
-            return forwardedFor.split(",")[0].trim();
+            return bucketKeyFor(forwardedFor.split(",")[0].trim());
         }
-        return request.getRemoteAddr();
+        return bucketKeyFor(request.getRemoteAddr());
+    }
+
+    /**
+     * An IPv6 subscriber is normally handed a whole /64, so keying on the full address would
+     * give one attacker billions of fresh buckets. IPv6 addresses are keyed on their /64 prefix;
+     * IPv4 (and anything unparseable) is used as-is.
+     */
+    static String bucketKeyFor(String ip) {
+        if (!ip.contains(":")) {
+            return ip;
+        }
+        try {
+            // A literal containing ':' is never resolved via DNS.
+            byte[] address = InetAddress.getByName(ip).getAddress();
+            if (address.length != 16) {
+                return InetAddress.getByAddress(address).getHostAddress(); // IPv4-mapped form
+            }
+            return HexFormat.of().formatHex(address, 0, 8) + "::/64";
+        } catch (UnknownHostException e) {
+            return ip;
+        }
+    }
+
+    private void rejectWithPayloadTooLarge(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpStatus.PAYLOAD_TOO_LARGE.value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+
+        ApiResponse<?> body = ApiResponse.error("PAYLOAD_TOO_LARGE", "Request body is too large.");
+        response.getWriter().write(objectMapper.writeValueAsString(body));
     }
 
     private void rejectWithTooManyRequests(HttpServletResponse response, long retryAfterSeconds) throws IOException {

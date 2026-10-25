@@ -3,6 +3,7 @@ package com.moneyflow.shared.exception;
 import com.moneyflow.shared.dto.ApiResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -44,6 +45,17 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.NOT_FOUND)
                 .body(ApiResponse.error("NOT_FOUND", "The requested resource does not exist"));
+    }
+
+    // e.g. SQLite's SQLITE_BUSY when another writer holds the database: a retry will succeed,
+    // so say so instead of reporting a server fault.
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<ApiResponse<?>> handleDatabaseBusy(PessimisticLockingFailureException ex) {
+        log.warn("Database busy: {}", ex.getMessage());
+        return ResponseEntity
+                .status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header("Retry-After", "1")
+                .body(ApiResponse.error("SERVICE_BUSY", "The server is busy. Please try again."));
     }
 
     @ExceptionHandler(Exception.class)

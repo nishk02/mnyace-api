@@ -577,7 +577,7 @@ public class TransactionService {
             BigDecimal oldTotal = existingAllocations.stream()
                     .map(GoalAllocationItem::amount).reduce(BigDecimal.ZERO, BigDecimal::add);
             String goalNames = existingAllocations.stream()
-                    .map(a -> goalRepository.findById(a.goalId()).map(Goal::getName).orElse("a goal"))
+                    .map(a -> goalRepository.findByIdAndUserId(a.goalId(), transaction.getUser().getId()).map(Goal::getName).orElse("a goal"))
                     .distinct().reduce((a, b) -> a + " and " + b).orElse("a goal");
             String info = "This transaction previously drew ₹" + formatAmount(oldTotal) + " from " + goalNames +
                     ". Since the new amount fits within your account's balance, that money has been returned and " +
@@ -708,7 +708,7 @@ public class TransactionService {
 
         if (newAmount.compareTo(goalAllocationService.getFreeBalance(account)) <= 0) {
             String goalNames = existingAllocations.stream()
-                    .map(a -> goalRepository.findById(a.goalId()).map(Goal::getName).orElse("a goal"))
+                    .map(a -> goalRepository.findByIdAndUserId(a.goalId(), account.getUser().getId()).map(Goal::getName).orElse("a goal"))
                     .distinct()
                     .reduce((a, b) -> a + " and " + b)
                     .orElse("a goal");

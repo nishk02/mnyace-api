@@ -6,6 +6,7 @@ import org.hibernate.Hibernate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -15,7 +16,11 @@ public class RefreshTokenRevoker {
     private final RefreshTokenRepository refreshTokenRepository;
     private final RefreshTokenIssuer refreshTokenIssuer;
 
-    public enum Status { NOT_FOUND, REUSE_DETECTED, EXPIRED, VALID }
+    public enum Status { NOT_FOUND, REUSE_DETECTED, DUPLICATE_REQUEST, EXPIRED, VALID }
+
+    // A token rotated this recently was most likely sent twice by the same client (double-fired
+    // refresh), not replayed by a thief, so it is refused without revoking the whole family.
+    private static final Duration DUPLICATE_REQUEST_WINDOW = Duration.ofSeconds(5);
 
     public record CheckResult(Status status, String validTokenId) {
         public static CheckResult of(Status status) { return new CheckResult(status, null); }
@@ -30,6 +35,9 @@ public class RefreshTokenRevoker {
         }
         LocalDateTime now = LocalDateTime.now();
         if (current.getRevokedAt() != null) {
+            if (current.getRevokedAt().isAfter(now.minus(DUPLICATE_REQUEST_WINDOW))) {
+                return CheckResult.of(Status.DUPLICATE_REQUEST);
+            }
             revokeFamily(current.getFamilyId(), now);
             return CheckResult.of(Status.REUSE_DETECTED);
         }
