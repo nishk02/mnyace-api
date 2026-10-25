@@ -4,7 +4,6 @@ import jakarta.servlet.ReadListener;
 import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
-import org.springframework.util.StreamUtils;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
@@ -16,13 +15,30 @@ import java.nio.charset.StandardCharsets;
  * Wraps the request so its body can be read twice: once in RateLimitFilter
  * (to pull the email out for the per-email bucket), and once more,
  * normally, by Spring's @RequestBody binding in the controller.
+ *
+ * The body is capped at maxBytes: this runs before authentication, so an
+ * unbounded read would let any anonymous caller exhaust the heap.
  */
 class CachedBodyHttpServletRequest extends HttpServletRequestWrapper {
     private final byte[] body;
 
-    CachedBodyHttpServletRequest(HttpServletRequest request) throws IOException {
+    static class BodyTooLargeException extends IOException {
+        BodyTooLargeException(int maxBytes) {
+            super("Request body exceeds " + maxBytes + " bytes");
+        }
+    }
+
+    CachedBodyHttpServletRequest(HttpServletRequest request, int maxBytes) throws IOException {
         super(request);
-        this.body = StreamUtils.copyToByteArray(request.getInputStream());
+        if (request.getContentLengthLong() > maxBytes) {
+            throw new BodyTooLargeException(maxBytes);
+        }
+        // Chunked bodies carry no Content-Length, so read one byte past the cap to detect overflow.
+        byte[] read = request.getInputStream().readNBytes(maxBytes + 1);
+        if (read.length > maxBytes) {
+            throw new BodyTooLargeException(maxBytes);
+        }
+        this.body = read;
     }
 
     byte[] getBody() {

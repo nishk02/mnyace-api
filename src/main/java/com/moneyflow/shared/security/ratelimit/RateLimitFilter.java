@@ -32,6 +32,9 @@ import java.io.IOException;
  */
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
+    // A signin body is an email, a password and an optional device label; anything near this is abuse.
+    private static final int MAX_SIGNIN_BODY_BYTES = 4096;
+
     private final RateLimiterService signinIpRateLimiter;
     private final RateLimiterService signinEmailRateLimiter;
     private final RateLimiterService refreshIpRateLimiter;
@@ -55,8 +58,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @NonNull HttpServletResponse response,
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
-        boolean isSignin = isPost(request) && "/auth/signin".equals(request.getRequestURI());
-        boolean isRefresh = isPost(request) && "/auth/refresh".equals(request.getRequestURI());
+        // getServletPath(), not getRequestURI(): the latter is the raw, still-encoded path, so
+        // /auth/%73ignin would skip this filter yet be decoded and routed to /auth/signin.
+        String path = request.getServletPath();
+        boolean isSignin = isPost(request) && "/auth/signin".equals(path);
+        boolean isRefresh = isPost(request) && "/auth/refresh".equals(path);
 
         if (!isSignin && !isRefresh) {
             filterChain.doFilter(request, response);
@@ -75,14 +81,21 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        // isSignin: buffer the body so we can read the email for the
-        // per-email bucket, then still hand an intact, re-readable body
-        // down to the controller's @RequestBody binding.
-        CachedBodyHttpServletRequest cachedRequest = new CachedBodyHttpServletRequest(request);
-
+        // isSignin: charge the IP bucket first, so a flood of oversized bodies is throttled
+        // before any of them is read.
         RateLimiterService.Decision ipDecision = signinIpRateLimiter.consume(clientIp);
         if (!ipDecision.allowed()) {
             rejectWithTooManyRequests(response, ipDecision.retryAfterSeconds());
+            return;
+        }
+
+        // Then buffer the (size-capped) body so we can read the email for the per-email
+        // bucket, and still hand an intact, re-readable body to @RequestBody binding.
+        CachedBodyHttpServletRequest cachedRequest;
+        try {
+            cachedRequest = new CachedBodyHttpServletRequest(request, MAX_SIGNIN_BODY_BYTES);
+        } catch (CachedBodyHttpServletRequest.BodyTooLargeException e) {
+            rejectWithPayloadTooLarge(response);
             return;
         }
 
@@ -129,6 +142,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return forwardedFor.split(",")[0].trim();
         }
         return request.getRemoteAddr();
+    }
+
+    private void rejectWithPayloadTooLarge(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpStatus.PAYLOAD_TOO_LARGE.value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+
+        ApiResponse<?> body = ApiResponse.error("PAYLOAD_TOO_LARGE", "Request body is too large.");
+        response.getWriter().write(objectMapper.writeValueAsString(body));
     }
 
     private void rejectWithTooManyRequests(HttpServletResponse response, long retryAfterSeconds) throws IOException {
