@@ -34,6 +34,9 @@ class RateLimitFilterIntegrationTest {
     @Value("${rate-limit.signin.ip.capacity}")
     private int signinIpCapacity;
 
+    @Value("${rate-limit.signin.email.capacity}")
+    private int signinEmailCapacity;
+
     @Value("${rate-limit.refresh.ip.capacity}")
     private int refreshIpCapacity;
 
@@ -70,6 +73,23 @@ class RateLimitFilterIntegrationTest {
     @Test
     void inviteVerifyOtp_percentEncodedPath_isRateLimitedPerIp() throws Exception {
         assertLimitedAfter(inviteIpCapacity, "/auth/invites/abc/%76erify-otp", "10.1.0.8", i -> "{\"code\":\"000000\"}");
+    }
+
+    @Test
+    void signin_perEmailBucket_limitsGuessesAcrossManyIps() throws Exception {
+        int capacity = signinEmailCapacity;
+        for (int i = 0; i < capacity; i++) {
+            // a different IP every time, so only the email bucket can trip
+            HttpResponse<String> response = post("/auth/signin", "10.2.0." + (i + 1),
+                    "{\"email\":\"Victim@X.com\",\"password\":\"wrong\"}");
+            assertThat(response.statusCode()).isNotEqualTo(429);
+        }
+
+        // casing and padding must not dodge the bucket
+        HttpResponse<String> limited = post("/auth/signin", "10.2.1.1",
+                "{\"email\":\" victim@x.com \",\"password\":\"wrong\"}");
+        assertThat(limited.statusCode()).isEqualTo(429);
+        assertThat(limited.headers().firstValue("Retry-After")).isPresent();
     }
 
     @Test
