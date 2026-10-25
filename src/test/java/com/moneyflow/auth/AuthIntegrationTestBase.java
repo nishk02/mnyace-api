@@ -44,6 +44,7 @@ public abstract class AuthIntegrationTestBase {
         registry.add("rate-limit.signin.ip.capacity", () -> "1000");
         registry.add("rate-limit.signin.email.capacity", () -> "1000");
         registry.add("rate-limit.refresh.ip.capacity", () -> "1000");
+        registry.add("rate-limit.invite.ip.capacity", () -> "1000");
     }
 
     /** A unique client IP per call, so tests never share an IP bucket. */

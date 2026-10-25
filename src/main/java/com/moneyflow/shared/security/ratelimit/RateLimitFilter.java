@@ -15,9 +15,10 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.regex.Pattern;
 
 /**
- * Rate-limits POST /auth/signin and POST /auth/refresh, ahead of
+ * Rate-limits POST /auth/signin, POST /auth/refresh and the invite POSTs, ahead of
  * JwtAuthFilter. These are permitAll (no JWT to gate them) — exactly why
  * they're worth protecting here: signin is the one place a password can be
  * guessed at all, and refresh is a DoS target because it does real work
@@ -32,23 +33,30 @@ import java.io.IOException;
  */
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
+    // The invite POSTs (signup, verify-otp, resend-otp) are public too; verify-otp is a guessable 6-digit code.
+    private static final Pattern INVITE_ACTION_PATH =
+            Pattern.compile("/auth/invites/[^/]+/(signup|verify-otp|resend-otp)");
+
     // A signin body is an email, a password and an optional device label; anything near this is abuse.
     private static final int MAX_SIGNIN_BODY_BYTES = 4096;
 
     private final RateLimiterService signinIpRateLimiter;
     private final RateLimiterService signinEmailRateLimiter;
     private final RateLimiterService refreshIpRateLimiter;
+    private final RateLimiterService inviteIpRateLimiter;
     private final ObjectMapper objectMapper;
 
     public RateLimitFilter(
             @Qualifier("signinIpRateLimiter") RateLimiterService signinIpRateLimiter,
             @Qualifier("signinEmailRateLimiter") RateLimiterService signinEmailRateLimiter,
             @Qualifier("refreshIpRateLimiter") RateLimiterService refreshIpRateLimiter,
+            @Qualifier("inviteIpRateLimiter") RateLimiterService inviteIpRateLimiter,
             ObjectMapper objectMapper
     ) {
         this.signinIpRateLimiter = signinIpRateLimiter;
         this.signinEmailRateLimiter = signinEmailRateLimiter;
         this.refreshIpRateLimiter = refreshIpRateLimiter;
+        this.inviteIpRateLimiter = inviteIpRateLimiter;
         this.objectMapper = objectMapper;
     }
 
@@ -64,12 +72,24 @@ public class RateLimitFilter extends OncePerRequestFilter {
         boolean isSignin = isPost(request) && "/auth/signin".equals(path);
         boolean isRefresh = isPost(request) && "/auth/refresh".equals(path);
 
-        if (!isSignin && !isRefresh) {
+        boolean isInviteAction = isPost(request) && INVITE_ACTION_PATH.matcher(path).matches();
+
+        if (!isSignin && !isRefresh && !isInviteAction) {
             filterChain.doFilter(request, response);
             return;
         }
 
         String clientIp = resolveClientIp(request);
+
+        if (isInviteAction) {
+            RateLimiterService.Decision decision = inviteIpRateLimiter.consume(clientIp);
+            if (!decision.allowed()) {
+                rejectWithTooManyRequests(response, decision.retryAfterSeconds());
+                return;
+            }
+            filterChain.doFilter(request, response);
+            return;
+        }
 
         if (isRefresh) {
             RateLimiterService.Decision decision = refreshIpRateLimiter.consume(clientIp);

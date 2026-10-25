@@ -37,6 +37,9 @@ class RateLimitFilterIntegrationTest {
     @Value("${rate-limit.refresh.ip.capacity}")
     private int refreshIpCapacity;
 
+    @Value("${rate-limit.invite.ip.capacity}")
+    private int inviteIpCapacity;
+
     private final HttpClient client = HttpClient.newHttpClient();
 
     @Test
@@ -57,6 +60,16 @@ class RateLimitFilterIntegrationTest {
     @Test
     void refresh_percentEncodedPath_isRateLimitedPerIp() throws Exception {
         assertLimitedAfter(refreshIpCapacity, "/auth/%72efresh", "10.1.0.4", i -> "{\"refreshToken\":\"x\"}");
+    }
+
+    @Test
+    void inviteVerifyOtp_plainPath_isRateLimitedPerIp() throws Exception {
+        assertLimitedAfter(inviteIpCapacity, "/auth/invites/abc/verify-otp", "10.1.0.7", i -> "{\"code\":\"000000\"}");
+    }
+
+    @Test
+    void inviteVerifyOtp_percentEncodedPath_isRateLimitedPerIp() throws Exception {
+        assertLimitedAfter(inviteIpCapacity, "/auth/invites/abc/%76erify-otp", "10.1.0.8", i -> "{\"code\":\"000000\"}");
     }
 
     @Test

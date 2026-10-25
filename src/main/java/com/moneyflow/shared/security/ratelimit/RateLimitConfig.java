@@ -32,4 +32,12 @@ public class RateLimitConfig {
     ) {
         return new RateLimiterService(capacity, Duration.ofSeconds(periodSeconds));
     }
+
+    @Bean
+    public RateLimiterService inviteIpRateLimiter(
+            @Value("${rate-limit.invite.ip.capacity}") long capacity,
+            @Value("${rate-limit.invite.ip.period-seconds}") long periodSeconds
+    ) {
+        return new RateLimiterService(capacity, Duration.ofSeconds(periodSeconds));
+    }
 }

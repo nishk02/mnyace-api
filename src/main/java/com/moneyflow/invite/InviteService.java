@@ -20,7 +20,9 @@ public class InviteService {
     private static final int TOKEN_BYTES = 32;
     private static final int VALIDITY_DAYS = 7;
     private static final int OTP_TTL_MINUTES = 10;
-    private static final int MAX_OTP_ATTEMPTS = 5;
+    // Lifetime cap per invite, deliberately not reset by a resend: otherwise resending would
+    // hand an attacker a fresh set of guesses every minute.
+    private static final int MAX_OTP_ATTEMPTS = 10;
     private static final int RESEND_COOLDOWN_SECONDS = 60;
 
     private final InviteRepository inviteRepository;
@@ -99,16 +101,16 @@ public class InviteService {
         if (invite.getOtpExpiresAt() == null || invite.getOtpExpiresAt().isBefore(LocalDateTime.now())) {
             throw ApiException.badRequest("This code has expired. Request a new one.");
         }
-        if (invite.getOtpAttempts() >= MAX_OTP_ATTEMPTS) {
-            throw ApiException.badRequest("Too many incorrect attempts. Request a new code.");
-        }
         if (userRepository.countByRole("MEMBER") >= maxUsers) {
             throw ApiException.conflict("The user limit for this workspace has been reached.");
         }
 
+        // Spend the guess before checking it, so a burst of parallel requests is capped too.
+        if (inviteRepository.consumeOtpAttempt(invite.getId(), MAX_OTP_ATTEMPTS) == 0) {
+            throw ApiException.badRequest("Too many incorrect attempts. Ask for a new invite.");
+        }
+
         if (!passwordEncoder.matches(request.code(), invite.getOtpCodeHash())) {
-            invite.setOtpAttempts(invite.getOtpAttempts() + 1);
-            inviteRepository.save(invite);
             throw ApiException.unauthorized("Incorrect code");
         }
 
@@ -156,7 +158,6 @@ public class InviteService {
         String code = generateOtpCode();
         invite.setOtpCodeHash(passwordEncoder.encode(code));
         invite.setOtpExpiresAt(LocalDateTime.now().plusMinutes(OTP_TTL_MINUTES));
-        invite.setOtpAttempts(0);
         emailService.sendOtpEmail(invite.getEmail(), code);
     }
 
