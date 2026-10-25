@@ -7,6 +7,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
+
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -15,13 +17,23 @@ public class AuthService {
     private final JwtUtil jwtUtil;
     private final RefreshTokenService refreshTokenService;
 
+    // A dummy BCrypt hash (cost 10) used for unknown emails to keep signin
+    // timing consistent and prevent email enumeration.
+    private static final String DUMMY_PASSWORD_HASH =
+            "$2a$10$6rtN/l7.pj9lD0ad1RxkMuuJY6LLt4b9gGK5RlfyXgSSQYNz91kry";
+
     @Transactional
     public AuthResponse signIn(SignInRequest request) {
-        User user = userRepository.findByEmail(request.email())
-                .orElseThrow(() -> ApiException.unauthorized("Invalid email or password"));
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+        Optional<User> userOpt = userRepository.findByEmail(request.email());
+        boolean passwordMatches = passwordEncoder.matches(
+                request.password(),
+                userOpt.map(User::getPasswordHash).orElse(DUMMY_PASSWORD_HASH)
+        );
+
+        if (userOpt.isEmpty() || !passwordMatches) {
             throw ApiException.unauthorized("Invalid email or password");
         }
+        User user = userOpt.get();
 
         String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole());
         RefreshTokenIssuer.IssuedRefreshToken refreshToken =
