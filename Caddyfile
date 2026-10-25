@@ -1,4 +1,6 @@
 {$API_DOMAIN} {
+    header Strict-Transport-Security "max-age=31536000"
+
     reverse_proxy api:8080
 
     # Answer 503 with Retry-After instead of 502 while the api restarts.
