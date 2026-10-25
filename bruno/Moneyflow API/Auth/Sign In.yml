@@ -6,6 +6,10 @@ info:
 http:
   method: POST
   url: "{{BASE_URL}}/auth/signin"
+  headers:
+    - name: X-Client-Platform
+      value: web
+      disabled: true
   body:
     type: json
     data: |-
