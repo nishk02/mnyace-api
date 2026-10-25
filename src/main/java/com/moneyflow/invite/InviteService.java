@@ -1,5 +1,6 @@
 package com.moneyflow.invite;
 
+import com.moneyflow.shared.util.EmailNormalizer;
 import com.moneyflow.auth.*;
 import com.moneyflow.shared.email.EmailService;
 import com.moneyflow.shared.exception.ApiException;
@@ -40,8 +41,13 @@ public class InviteService {
         User admin = userRepository.findById(adminUserId)
                 .orElseThrow(() -> ApiException.unauthorized("Not authenticated"));
 
+        String email = EmailNormalizer.normalize(request.email());
+        if (userRepository.existsByEmailIgnoreCase(email)) {
+            throw ApiException.conflict("A user with this email already exists");
+        }
+
         Invite invite = new Invite();
-        invite.setEmail(request.email());
+        invite.setEmail(email);
         invite.setToken(generateToken());
         invite.setStatus(InviteStatus.PENDING);
         invite.setInvitedBy(admin);
@@ -117,7 +123,7 @@ public class InviteService {
         User user = new User();
         user.setFirstName(invite.getPendingFirstName());
         user.setLastName(invite.getPendingLastName());
-        user.setEmail(invite.getEmail());
+        user.setEmail(EmailNormalizer.normalize(invite.getEmail()));
         user.setPasswordHash(invite.getPendingPasswordHash());
         user.setRole("MEMBER");
         User savedUser = userRepository.save(user);

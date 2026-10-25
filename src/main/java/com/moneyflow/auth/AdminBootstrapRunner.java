@@ -1,5 +1,6 @@
 package com.moneyflow.auth;
 
+import com.moneyflow.shared.util.EmailNormalizer;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,7 +35,7 @@ public class AdminBootstrapRunner implements CommandLineRunner {
         User admin = new User();
         admin.setFirstName("Admin");
         admin.setLastName("User");
-        admin.setEmail(adminEmail);
+        admin.setEmail(EmailNormalizer.normalize(adminEmail));
         admin.setPasswordHash(passwordEncoder.encode(adminPassword));
         admin.setRole("ADMIN");
         userRepository.save(admin);

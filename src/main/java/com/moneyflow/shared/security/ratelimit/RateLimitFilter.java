@@ -1,5 +1,6 @@
 package com.moneyflow.shared.security.ratelimit;
 
+import com.moneyflow.shared.util.EmailNormalizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moneyflow.shared.dto.ApiResponse;
@@ -145,7 +146,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         try {
             JsonNode node = objectMapper.readTree(body);
             String email = node.path("email").asText(null);
-            return email == null ? null : email.trim().toLowerCase();
+            return EmailNormalizer.normalize(email);
         } catch (IOException e) {
             // Malformed JSON — let @Valid/@RequestBody rejection downstream
             // handle it normally; nothing to key an email bucket on here.
@@ -167,11 +168,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         return bucketKeyFor(request.getRemoteAddr());
     }
 
-    /**
-     * An IPv6 subscriber is normally handed a whole /64, so keying on the full address would
-     * give one attacker billions of fresh buckets. IPv6 addresses are keyed on their /64 prefix;
-     * IPv4 (and anything unparseable) is used as-is.
-     */
+    /** Keys IPv6 clients on their /64 prefix (one subscriber owns a whole /64); IPv4 and unparseable values are used as-is. */
     static String bucketKeyFor(String ip) {
         if (!ip.contains(":")) {
             return ip;

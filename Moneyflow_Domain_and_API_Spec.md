@@ -18,7 +18,7 @@
 <summary><strong>1.3.0 detailed changes</strong> (click to expand)</summary>
 
 **`GET /transactions`**
-- Paginated (`page`/`size`, default `size=100`); `sort` uses Spring Data's `property,direction` convention, repeatable for multi-field sort — not a separate `direction` param.
+- Paginated (`page`/`size`, default `size=100`, capped at 200); `sort` uses Spring Data's `property,direction` convention, repeatable for multi-field sort — not a separate `direction` param.
 - Month-navigation hints `previousPeriod`/`nextPeriod` added for calendar- and FY-filtered requests — resolve to the *nearest period with data*, not just the adjacent one, so a backdated entry several months back stays reachable even through empty months in between (originally shipped as booleans `hasPreviousMonthData`/`hasNextMonthData`, later replaced once backdating exposed the adjacent-only gap).
 - New `flowType=INCOME|EXPENSE` filter, composes with either period filter.
 - New `GET /transactions/available-periods`: years + months-per-year with any data, calendar lens only, powering a year-based month picker as a companion to (not a replacement for) the smart-skip arrows above.
@@ -965,6 +965,10 @@ All endpoints require `Authorization: Bearer {jwt}` except `/auth/**`.
 
 ---
 
+### Input Limits
+
+Requests beyond these are refused with `400 VALIDATION_ERROR`: names up to 100 characters, color labels 30, transaction notes 250, amounts up to 13 integer digits and 2 decimal places, goal-allocation lists up to 50 entries, goal reorder up to 200 items. Page size is capped at 200. The one unauthenticated body read before authentication, `/auth/signin`, is capped at 4 KB and answers `413` beyond that (BR-27).
+
 ### Auth
 
 Self-registration is invite-only — there is no public "create an account" endpoint. A new `User` only ever comes into existence via the **Invites** flow below (or, for the very first account, `AdminBootstrapRunner` at startup). `/auth/**` stays fully `permitAll` even though it now covers the invite-acceptance endpoints too, since every step of that flow happens before the person has a JWT to present.
@@ -1055,6 +1059,8 @@ How a new `User` actually gets created. Three steps: an admin vouches for an ema
 }
 ```
 An invite-email is sent immediately. If the workspace is already at or past `app.max-users`, the invite is still created (response carries a `warning` field) — the hard limit is enforced later, at OTP verification, not here (BR-18).
+The email is trimmed and stored lowercase.
+**409:** a user with that email already exists (matched case-insensitively). An expired or unfinished invite does not block a new one.
 
 ---
 
@@ -1300,7 +1306,7 @@ calendarYear=2026&calendarMonth=8       filter by calendar month/year
 financialYear=FY26-27&financialMonth=5  filter by financial year/month (1=April..12=March)
 from=2026-07-27&to=2026-08-02           filter by an explicit inclusive date range (added v1.5.0)
 flowType=INCOME|EXPENSE                 filter by cash-flow direction, independent of the above
-page=0&size=100                         0-indexed page, size defaults to 100
+page=0&size=100                         0-indexed page, size defaults to 100 and is capped at 200
 sort=date,desc                          optional override of the default sort
 ```
 
@@ -1894,6 +1900,8 @@ A category with `isInternal = true` (currently just `Opening Balance`, `cat-35`)
 Replaces open self-registration entirely (`POST /auth/signup` removed, v1.4.0). A new `User` is created in exactly two ways: `AdminBootstrapRunner` seeds the first `ADMIN` from env vars at startup (solving the chicken-and-egg problem of nobody existing yet to send the first invite), and every subsequent `User` is `MEMBER`, created only through this flow.
 
 **The three-step state machine:** `PENDING` (admin created the invite, email sent) → `AWAITING_OTP` (invited person submitted name/password, code sent) → `COMPLETED` (code verified, `User` created). The `User` row does not exist until the final step — `pendingFirstName`/`pendingLastName`/`pendingPasswordHash` hold the staged details in the interim, cleared the instant they're promoted to a real `User`.
+
+**An email is one identity regardless of case.** Emails are trimmed and stored lowercase (`EmailNormalizer`, `Locale.ROOT` so the result never depends on the server's locale), and every lookup — signin, bootstrap, the invite check — ignores case, so `Alice@x.com` and `alice@x.com` can never be two accounts. Creating an invite for an email that already has a user returns `409`; an expired or unfinished invite does not count, because the `User` row only exists once the OTP is verified, so an admin can always re-invite.
 
 **OTP is treated exactly like a password, not like a lesser secret:** the 6-digit code is BCrypt-hashed with the same `PasswordEncoder` bean before storage (`otpCodeHash`) — never stored or logged in plaintext. Expires after 10 minutes. Capped at 10 guesses per invite for its whole lifetime: a resend issues a fresh code but does not reset the count, otherwise resending every 60 seconds would hand an attacker a fresh set of guesses indefinitely. Each guess is spent with a single atomic `UPDATE … WHERE otp_attempts < max` *before* the code is compared, so a burst of parallel requests cannot all pass a read-then-write check and exceed the cap. Once the cap is spent the invite is dead and an admin issues a new one.
 

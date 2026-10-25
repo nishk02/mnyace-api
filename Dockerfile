@@ -56,6 +56,9 @@ USER moneyflow
 
 EXPOSE 8080
 
+# Default to prod, so the image never boots in the dev profile if the variable is missing.
+ENV SPRING_PROFILES_ACTIVE=prod
+
 # MaxRAMPercentage lets the JVM size its heap relative to whatever memory
 # limit Docker actually gives this container, rather than a hardcoded -Xmx
 # that would silently need updating every time you resize the instance.
