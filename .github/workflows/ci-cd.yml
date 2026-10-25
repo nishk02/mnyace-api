@@ -33,6 +33,16 @@ jobs:
           java-version: "21"
           cache: maven # caches ~/.m2 keyed on pom.xml, same idea as caching node_modules on package-lock.json
 
+      - name: Guard - the api container must never be published to the host
+        # RateLimitFilter trusts X-Forwarded-For because only Caddy can reach the api
+        # container (docker-compose `expose`, never `ports`). Publishing it would let anyone
+        # forge their IP and walk around the limiter.
+        run: |
+          if awk '/^  api:/{f=1;next} /^  [a-z-]+:/{f=0} f && /^    ports:/{found=1} END{exit !found}' docker-compose.yml; then
+            echo "docker-compose.yml publishes ports on the api service" >&2
+            exit 1
+          fi
+
       - name: Build and test
         run: ./mvnw -B clean verify
         # No src/test yet, so this is effectively a compile check today.
@@ -63,7 +73,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./DockerFile # actual filename in this repo is capitalised - explicit `file:` sidesteps needing a rename
+          file: ./Dockerfile
           push: false
           load: true # makes the image available to `docker` on this runner so Trivy below can scan it
           tags: ${{ env.IMAGE }}:scan
@@ -81,7 +91,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./DockerFile
+          file: ./Dockerfile
           push: true
           tags: |
             ${{ env.IMAGE }}:latest
@@ -128,6 +138,7 @@ jobs:
           script: |
             cd ~/moneyflow-deploy
             set -e
+            umask 077 # .env is created owner-only, never briefly world-readable
             echo "JWT_SECRET=${JWT_SECRET}" > .env
             echo "API_DOMAIN=${API_DOMAIN}" >> .env
             echo "LITESTREAM_BUCKET=${LITESTREAM_BUCKET}" >> .env

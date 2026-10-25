@@ -27,7 +27,7 @@ The one habit worth building: **containers are disposable by default.** Docker a
 
 ## 3. The Dockerfile — the recipe that produces an image
 
-This project's `DockerFile` is a real, working example of the standard shape:
+This project's `Dockerfile` is a real, working example of the standard shape:
 
 - **`FROM`** — the base image to start from (this project uses two: a JDK image to build, a slimmer JRE image to actually run — a *multi-stage build*, so the final image never carries the compiler/build tools, only what's needed to run).
 - **`WORKDIR`** — sets the working directory inside the image for subsequent instructions, same idea as `cd`-ing before running commands.
@@ -98,7 +98,7 @@ Every service in the same Compose file automatically joins a shared private netw
 
 Putting every piece from this project into one line:
 
-**`DockerFile`** (the recipe) → `docker build` in CI produces an **image** → CI `docker push`es that image to **GHCR** (the registry) → **`docker-compose.yml`** declares which images to run, how they're networked, configured via env vars, and given persistent storage → `docker compose pull && docker compose up -d` on the VM fetches the images and starts the **containers**, wiring up the **volumes** and shared **network** declared in the file.
+**`Dockerfile`** (the recipe) → `docker build` in CI produces an **image** → CI `docker push`es that image to **GHCR** (the registry) → **`docker-compose.yml`** declares which images to run, how they're networked, configured via env vars, and given persistent storage → `docker compose pull && docker compose up -d` on the VM fetches the images and starts the **containers**, wiring up the **volumes** and shared **network** declared in the file.
 
 Every piece of infrastructure work in this project's deployment phase was one of these five steps — Caddy and Litestream are simply more entries in the same `services:` list, following the exact same rules as `api` does.
 
