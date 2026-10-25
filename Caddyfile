@@ -1,3 +1,13 @@
 {$API_DOMAIN} {
     reverse_proxy api:8080
+
+    # Answer 503 with Retry-After instead of 502 while the api restarts.
+    handle_errors {
+        @down expression {http.error.status_code} in [502, 503, 504]
+        handle @down {
+            header Retry-After 30
+            header Content-Type application/json
+            respond `{"success":false,"error":{"code":"SERVICE_UNAVAILABLE","message":"We're updating. Back in a minute."}}` 503
+        }
+    }
 }
