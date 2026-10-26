@@ -41,7 +41,7 @@ This project's `Dockerfile` is a real, working example of the standard shape:
 
 ## 4. Registries — GHCR is npm, one layer down
 
-Once an image is built, it needs somewhere to live so other machines (like the Lightsail VM) can fetch it without rebuilding from source every time. That's what GHCR is — `ghcr.io/nishk02/mnyace` is exactly analogous to a scoped npm package name. CI's `docker push` after a successful build/scan is `npm publish`. The VM's `docker compose pull` is `npm install` for that image. Whether that package is public or private works exactly like npm's public/private scoping too — which is the actual GHCR task still sitting on the backlog.
+Once an image is built, it needs somewhere to live so other machines (like the Lightsail VM) can fetch it without rebuilding from source every time. That's what GHCR is — `ghcr.io/nishk02/mnyace-api` is exactly analogous to a scoped npm package name. CI's `docker push` after a successful build/scan is `npm publish`. The VM's `docker compose pull` is `npm install` for that image. Whether that package is public or private works exactly like npm's public/private scoping too — which is the actual GHCR task still sitting on the backlog.
 
 ---
 
@@ -60,7 +60,7 @@ Reading this project's `docker-compose.yml` with that lens:
 ```yaml
 services:
   api:
-    image: ghcr.io/nishk02/mnyace:latest   # which image to run
+    image: ghcr.io/nishk02/mnyace-api:latest   # which image to run
     expose:
       - "8080"                                     # reachable by other containers, not the host
     environment:

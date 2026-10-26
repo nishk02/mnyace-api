@@ -53,7 +53,7 @@ COPY --from=build /app/target/*.jar app.jar
 RUN mkdir -p /app/data /app/logs && chown -R mnyace:mnyace /app
 
 # Links the image to the repository, so GHCR gives the package the repository's (public) visibility.
-LABEL org.opencontainers.image.source="https://github.com/nishk02/mnyace"
+LABEL org.opencontainers.image.source="https://github.com/nishk02/mnyace-api"
 
 USER mnyace
 

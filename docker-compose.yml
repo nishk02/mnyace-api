@@ -10,7 +10,7 @@ x-logging: &default-logging
 
 services:
   api:
-    image: ghcr.io/nishk02/mnyace:latest
+    image: ghcr.io/nishk02/mnyace-api:latest
     container_name: mnyace-api
     restart: unless-stopped
     logging: *default-logging
