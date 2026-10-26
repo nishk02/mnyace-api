@@ -910,6 +910,8 @@ com.moneyflow
 
 ## 6. Complete API Contract
 
+**Paths.** Everything is served under `/api`, except `/auth/**` (public, no prefix). Throughout this document paths are written without the prefix (`GET /accounts` is `GET /api/accounts`); a few places, such as `/api/admin/invites`, show it in full.
+
 ### Standard Response Envelope
 
 Every API response uses this wrapper — success or failure.
