@@ -20,7 +20,7 @@ public class AuthController {
             @RequestHeader(value = "X-Client-Platform", required = false) String platform
     ) {
         AuthResponse response = authService.signIn(request);
-        return respondWithToken(response, platform, "Signed in successfully");
+        return cookieWriter.authResponse(response, platform, "Signed in successfully");
     }
 
     @PostMapping("/refresh")
@@ -32,7 +32,7 @@ public class AuthController {
         String presentedToken = cookieWriter.resolveIncomingToken(
                 platform, refreshTokenCookie, request != null ? request.refreshToken() : null);
         AuthResponse response = authService.refresh(presentedToken);
-        return respondWithToken(response, platform, "Token refreshed successfully");
+        return cookieWriter.authResponse(response, platform, "Token refreshed successfully");
     }
 
     @PostMapping("/logout")
@@ -50,16 +50,5 @@ public class AuthController {
             builder = builder.header(HttpHeaders.SET_COOKIE, cookieWriter.buildClearCookieHeader());
         }
         return builder.body(ApiResponse.success(null, "Logged out successfully"));
-    }
-
-    private ResponseEntity<ApiResponse<AuthResponse>> respondWithToken(
-            AuthResponse response, String platform, String message
-    ) {
-        if (cookieWriter.isWeb(platform)) {
-            return ResponseEntity.ok()
-                    .header(HttpHeaders.SET_COOKIE, cookieWriter.buildSetCookieHeader(response.refreshToken()))
-                    .body(ApiResponse.success(response.withoutRefreshToken(), message));
-        }
-        return ResponseEntity.ok(ApiResponse.success(response, message));
     }
 }

@@ -1,7 +1,10 @@
 package com.moneyflow.auth;
 
+import com.moneyflow.shared.dto.ApiResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -24,6 +27,16 @@ public class RefreshTokenCookieWriter {
     // Web reads the token from the cookie; everyone else reads it from the body.
     public String resolveIncomingToken(String platformHeader, String cookieValue, String bodyValue) {
         return isWeb(platformHeader) ? cookieValue : bodyValue;
+    }
+
+    /** Web gets the refresh token as a cookie and never in the body; everyone else gets it in the body. */
+    public ResponseEntity<ApiResponse<AuthResponse>> authResponse(AuthResponse response, String platform, String message) {
+        if (isWeb(platform)) {
+            return ResponseEntity.ok()
+                    .header(HttpHeaders.SET_COOKIE, buildSetCookieHeader(response.refreshToken()))
+                    .body(ApiResponse.success(response.withoutRefreshToken(), message));
+        }
+        return ResponseEntity.ok(ApiResponse.success(response, message));
     }
 
     public String buildSetCookieHeader(String rawToken) {

@@ -786,6 +786,8 @@ CREATE INDEX idx_month_summaries_lookup
 com.moneyflow
 ├── auth/
 │   ├── AuthController.java           signin, refresh, logout — see invite/ for onboarding
+│   ├── PasswordController.java       PUT /api/users/me/password
+│   ├── PasswordService.java          change password: verify, rate-limit, revoke every session, issue a fresh one
 │   ├── SessionController.java        DELETE /api/sessions — sign out of every device
 │   ├── AuthService.java
 │   ├── AdminBootstrapRunner.java     Seeds the first ADMIN from env vars at startup
@@ -1053,6 +1055,21 @@ The access token already issued cannot be revoked (it is stateless) and keeps wo
 
 ---
 
+#### PUT /users/me/password — requires JWT
+```json
+{ "currentPassword": "OldPassword123!", "newPassword": "NewPassword456!", "confirmNewPassword": "NewPassword456!", "deviceLabel": "iPhone" }
+```
+Changes the caller's password. `deviceLabel` is optional. The new password must be 8 to 72 characters (and at most 72 UTF-8 bytes, because BCrypt ignores anything beyond that), must match its confirmation, and must differ from the current one.
+
+On success every refresh token of the user is revoked, so all other devices are signed out, and the caller receives a **fresh session** (new access token plus a new refresh token, as `/auth/signin` returns it; web clients get it as the cookie instead). Access tokens already issued to other devices keep working until they expire, at most 15 minutes.
+
+**Response 200:** same shape as `/auth/signin`.
+**400:** `INVALID_CURRENT_PASSWORD` — deliberately a `400`, not a `401`: clients treat a `401` as an expired session and would sign the user out over a typo. Also `400` for a weak or over-long new password, a mismatched confirmation, or a new password equal to the current one.
+**401:** missing or invalid access token.
+**429:** `TOO_MANY_REQUESTS` after 5 attempts per user in 15 minutes (BR-27). Without a cap, someone holding a stolen access token could use the current-password check to test password guesses.
+
+---
+
 ### Invites
 
 How a new `User` actually gets created. Three steps: an admin vouches for an email, the invited person proves their name/password intent, then proves they own the inbox via a 6-digit code. A read-only lookup sits alongside these so the frontend can confirm the invited email before any of that starts. See BR-18 for the full rule set. The three POST steps are rate-limited per IP (BR-27) and answer `429` beyond it.
@@ -1110,6 +1127,7 @@ The invited person's first step after opening the emailed link — stages their 
 }
 ```
 **Response 200:** `{ "message": "Verification code sent to your email" }` — no token, no user object, because neither exists yet.
+**400:** `VALIDATION_ERROR` — the password must be 8 to 72 characters and at most 72 UTF-8 bytes (BCrypt refuses to encode more and ignores the excess when matching), and must match `confirmPassword`. The same limits apply when changing a password.
 
 ---
 
@@ -2052,7 +2070,7 @@ A `RefreshToken` is opaque (32 random bytes, URL-safe base64) and never a JWT �
 
 **Duplicate and concurrent refreshes are not treated as theft.** A client that fires `/auth/refresh` twice at once (a tab resuming, two parallel requests hitting an expired JWT) presents the same token twice. Rotations of one token are serialized in-process (a striped lock keyed on the token hash — Moneyflow is a single instance, and SQLite fails rather than waits when two transactions try to upgrade a read to a write). The first rotation wins; a token that was rotated within the last 5 seconds is refused with the same generic `401` but its family is left intact, so the winner's new token keeps working. Presenting a rotated token *after* that window is treated as reuse and revokes the family as described above. If the database is still busy with another writer, the request answers `503` with `Retry-After`, never `500`.
 
-**A session also has an absolute lifetime.** Sliding expiry alone would let a stolen token on a lost or dormant device stay alive forever, because only the thief ever refreshes it, so nothing clashes and reuse detection never fires. Every token therefore carries `sessionStartedAt`, the time of the original password sign-in, copied unchanged into each rotated token. A token's `expiresAt` is the earlier of 30 days from issue and `sessionStartedAt` + `refresh-token.max-session-days` (90), and rotation additionally refuses any session older than the cap, so lowering the setting applies to sessions that are already running. Past the cap the response is the same generic `401`, and the user signs in with their password again. `DELETE /sessions` ends every session of the caller at once, which is the remedy for a lost device.
+**A session also has an absolute lifetime.** Sliding expiry alone would let a stolen token on a lost or dormant device stay alive forever, because only the thief ever refreshes it, so nothing clashes and reuse detection never fires. Every token therefore carries `sessionStartedAt`, the time of the original password sign-in, copied unchanged into each rotated token. A token's `expiresAt` is the earlier of 30 days from issue and `sessionStartedAt` + `refresh-token.max-session-days` (90), and rotation additionally refuses any session older than the cap, so lowering the setting applies to sessions that are already running. Past the cap the response is the same generic `401`, and the user signs in with their password again. `DELETE /sessions` ends every session of the caller at once, which is the remedy for a lost device, and a password change does the same while the device that made the change gets a fresh session.
 
 **Revoked tokens are kept until they have expired.** Reuse detection depends on being able to tell "this token never existed" apart from "this token existed but was already used" — deleting a revoked row while it could still be replayed would make the two indistinguishable and silently disable the mechanism. The row stays, with `revokedAt` set, as the record reuse-detection reads from. A daily job (`RefreshTokenCleanupJob`, 03:30 IST, `refresh-token.cleanup.*`) deletes only rows that expired more than 7 days ago: an expired token cannot be used anyway, so removing it loses nothing and a replay still gets the same generic `401`. Revoked-but-unexpired rows are never touched. The job runs inside the app (single instance, idempotent delete, catches up on the next run if one is missed). A future "active sessions" screen could be built from this same table.
 
@@ -2081,6 +2099,8 @@ Both endpoints are `permitAll` by necessity — there's no JWT yet to gate them 
 **Buckets are held in memory (Caffeine), not Redis**, which is the correct tradeoff specifically because Moneyflow runs as a single Lightsail instance — a distributed store would be pure overhead with nothing to coordinate across. Caffeine's `expireAfterAccess` evicts idle keys automatically, which matters because a plain `Map` would let an attacker grow the bucket structure forever just by varying the IP or email on every request; a bounded, self-cleaning cache closes that off. The one real cost of in-memory state: every counter resets on a container restart/redeploy — a non-issue for this threat model, since a redeploy clearing an attacker's counter isn't a meaningful win for them.
 
 **`/auth/invites/{token}/{signup|verify-otp|resend-otp}` share one per-IP bucket** (`rate-limit.invite.ip.*`, default 10 per 60s). `verify-otp` is a guessable six-digit code; the per-invite guess cap in BR-18 is the real defense, and this bucket keeps a single source from hammering many invites or flooding the mailer. The read-only `GET /auth/invites/{token}` stays unthrottled.
+
+**Password changes have their own per-user bucket** (`rate-limit.password-change.user.*`, default 5 per 900s), consumed by the service after the request shape is validated and before the current password is checked. It is keyed on the user, not the IP, because the caller is already authenticated.
 
 **The client's real IP is read from `X-Forwarded-For`, trusted directly rather than resolved via Tomcat's `RemoteIpValve` or Spring's forwarded-headers machinery**, because the `api` service in `docker-compose.yml` is `expose`d on the Docker network only, never `ports`-published to the host — Caddy is the *only* thing that can ever reach the container directly, so that header can only ever have been set by Caddy itself, never forged by an external caller bypassing it. CI enforces this: the build fails if `docker-compose.yml` ever gives the `api` service a `ports:` entry. Adopting a CDN or other proxy in front of Caddy changes this model and requires configuring Caddy's `trusted_proxies` and restricting the origin to that proxy's address ranges. The IP is the first `X-Forwarded-For` entry; IPv6 addresses are keyed on their `/64` prefix (one subscriber normally owns a whole `/64`, so keying on the full address would give an attacker billions of fresh buckets), and IPv4-mapped IPv6 addresses collapse to plain IPv4.
 
