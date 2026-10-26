@@ -1,4 +1,4 @@
-# Trivy vulnerability ignore list for moneyflow-api
+# Trivy vulnerability ignore list for mnyace-api
 #
 # CVE-2026-47884 / CVE-2026-47890 - Spring Framework (spring-webmvc).
 # Open-source fix exists only in Spring Framework 7.0.9, which requires

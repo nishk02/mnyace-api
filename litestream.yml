@@ -10,7 +10,7 @@ l0-retention: 5m
 l0-retention-check-interval: 1h
 
 dbs:
-  - path: /app/data/moneyflow.db
+  - path: /app/data/mnyace.db
     replica:
       type: s3
       bucket: ${LITESTREAM_BUCKET}

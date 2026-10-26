@@ -1,0 +1,44 @@
+package com.mnyace.transaction;
+
+import org.springframework.data.jpa.domain.Specification;
+
+import java.time.LocalDate;
+
+public class TransactionSpecifications {
+    private TransactionSpecifications() {
+    }
+
+    public static Specification<Transaction> belongsToUser(String userId) {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("user").get("id"), userId);
+    }
+
+    public static Specification<Transaction> inCalendarMonth(int year, int month) {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.and(
+                criteriaBuilder.equal(root.get("calendarYear"), year),
+                criteriaBuilder.equal(root.get("calendarMonth"), month));
+    }
+
+    public static Specification<Transaction> inFinancialMonth(String financialYear, int month) {
+        return (root, query, criteriaBuilder) -> criteriaBuilder.and(
+                criteriaBuilder.equal(root.get("financialYear"), financialYear),
+                criteriaBuilder.equal(root.get("month"), month));
+    }
+
+    public static Specification<Transaction> hasFlowType(FlowType flowType) {
+        return (root, query, criteriaBuilder) -> root.get("type").in(flowType.getTypes());
+    }
+
+    public static Specification<Transaction> dateBefore(LocalDate date) {
+        return (root, query, cb) -> cb.lessThan(root.get("date"), date);
+    }
+
+    public static Specification<Transaction> dateAfter(LocalDate date) {
+        return (root, query, cb) -> cb.greaterThan(root.get("date"), date);
+    }
+
+    public static Specification<Transaction> inDateRange(LocalDate from, LocalDate to) {
+        return (root, query, cb) -> cb.and(
+                cb.greaterThanOrEqualTo(root.get("date"), from),
+                cb.lessThanOrEqualTo(root.get("date"), to));
+    }
+}
