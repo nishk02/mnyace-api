@@ -4,6 +4,9 @@ import com.moneyflow.shared.util.EmailNormalizer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.moneyflow.shared.dto.ApiResponse;
+import com.moneyflow.shared.security.ClientIp;
+import com.moneyflow.shared.security.audit.SecurityEvent;
+import com.moneyflow.shared.security.audit.SecurityEvents;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -49,19 +52,22 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final RateLimiterService refreshIpRateLimiter;
     private final RateLimiterService inviteIpRateLimiter;
     private final ObjectMapper objectMapper;
+    private final SecurityEvents securityEvents;
 
     public RateLimitFilter(
             @Qualifier("signinIpRateLimiter") RateLimiterService signinIpRateLimiter,
             @Qualifier("signinEmailRateLimiter") RateLimiterService signinEmailRateLimiter,
             @Qualifier("refreshIpRateLimiter") RateLimiterService refreshIpRateLimiter,
             @Qualifier("inviteIpRateLimiter") RateLimiterService inviteIpRateLimiter,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            SecurityEvents securityEvents
     ) {
         this.signinIpRateLimiter = signinIpRateLimiter;
         this.signinEmailRateLimiter = signinEmailRateLimiter;
         this.refreshIpRateLimiter = refreshIpRateLimiter;
         this.inviteIpRateLimiter = inviteIpRateLimiter;
         this.objectMapper = objectMapper;
+        this.securityEvents = securityEvents;
     }
 
     @Override
@@ -83,12 +89,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return;
         }
 
-        String clientIp = resolveClientIp(request);
+        String clientIp = bucketKeyFor(ClientIp.of(request));
 
         if (isInviteAction) {
             RateLimiterService.Decision decision = inviteIpRateLimiter.consume(clientIp);
             if (!decision.allowed()) {
-                rejectWithTooManyRequests(response, decision.retryAfterSeconds());
+                rejectWithTooManyRequests(response, decision.retryAfterSeconds(), "invite_ip");
                 return;
             }
             filterChain.doFilter(request, response);
@@ -98,7 +104,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (isRefresh) {
             RateLimiterService.Decision decision = refreshIpRateLimiter.consume(clientIp);
             if (!decision.allowed()) {
-                rejectWithTooManyRequests(response, decision.retryAfterSeconds());
+                rejectWithTooManyRequests(response, decision.retryAfterSeconds(), "refresh_ip");
                 return;
             }
             filterChain.doFilter(request, response);
@@ -109,7 +115,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // before any of them is read.
         RateLimiterService.Decision ipDecision = signinIpRateLimiter.consume(clientIp);
         if (!ipDecision.allowed()) {
-            rejectWithTooManyRequests(response, ipDecision.retryAfterSeconds());
+            rejectWithTooManyRequests(response, ipDecision.retryAfterSeconds(), "signin_ip");
             return;
         }
 
@@ -127,7 +133,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (email != null) {
             RateLimiterService.Decision emailDecision = signinEmailRateLimiter.consume(email);
             if (!emailDecision.allowed()) {
-                rejectWithTooManyRequests(response, emailDecision.retryAfterSeconds());
+                rejectWithTooManyRequests(response, emailDecision.retryAfterSeconds(), "signin_email");
                 return;
             }
         }
@@ -160,13 +166,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
      * to the host — so X-Forwarded-For can only ever have been set by Caddy
      * itself, not forged by an external caller bypassing it.
      */
-    private String resolveClientIp(HttpServletRequest request) {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        if (forwardedFor != null && !forwardedFor.isBlank()) {
-            return bucketKeyFor(forwardedFor.split(",")[0].trim());
-        }
-        return bucketKeyFor(request.getRemoteAddr());
-    }
 
     /** Keys IPv6 clients on their /64 prefix (one subscriber owns a whole /64); IPv4 and unparseable values are used as-is. */
     static String bucketKeyFor(String ip) {
@@ -193,7 +192,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
         response.getWriter().write(objectMapper.writeValueAsString(body));
     }
 
-    private void rejectWithTooManyRequests(HttpServletResponse response, long retryAfterSeconds) throws IOException {
+    private void rejectWithTooManyRequests(HttpServletResponse response, long retryAfterSeconds, String bucket) throws IOException {
+        securityEvents.record(SecurityEvent.RATE_LIMITED, null, bucket);
         response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setHeader("Retry-After", String.valueOf(retryAfterSeconds));

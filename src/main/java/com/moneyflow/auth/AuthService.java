@@ -3,6 +3,8 @@ package com.moneyflow.auth;
 import com.moneyflow.shared.util.EmailNormalizer;
 import com.moneyflow.shared.exception.ApiException;
 import com.moneyflow.shared.security.JwtUtil;
+import com.moneyflow.shared.security.audit.SecurityEvent;
+import com.moneyflow.shared.security.audit.SecurityEvents;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -17,6 +19,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final RefreshTokenService refreshTokenService;
+    private final SecurityEvents securityEvents;
 
     // A dummy BCrypt hash (cost 10) used for unknown emails to keep signin
     // timing consistent and prevent email enumeration.
@@ -32,9 +35,12 @@ public class AuthService {
         );
 
         if (userOpt.isEmpty() || !passwordMatches) {
+            securityEvents.record(SecurityEvent.SIGNIN_FAILURE, userOpt.map(User::getId).orElse(null),
+                    userOpt.isEmpty() ? "unknown_user" : "wrong_password");
             throw ApiException.unauthorized("Invalid email or password");
         }
         User user = userOpt.get();
+        securityEvents.record(SecurityEvent.SIGNIN_SUCCESS, user.getId(), null);
 
         String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole());
         RefreshTokenIssuer.IssuedRefreshToken refreshToken =

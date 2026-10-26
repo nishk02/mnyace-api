@@ -50,7 +50,7 @@ COPY --from=build /app/target/*.jar app.jar
 # The SQLite file itself will live here, mounted in from outside the
 # container (via docker-compose, once we set that up) so it survives
 # container restarts and redeploys instead of vanishing with the container.
-RUN mkdir -p /app/data && chown -R moneyflow:moneyflow /app
+RUN mkdir -p /app/data /app/logs && chown -R moneyflow:moneyflow /app
 
 USER moneyflow
 

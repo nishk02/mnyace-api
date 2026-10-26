@@ -13,3 +13,4 @@ Dockerfile
 *.key
 *.db
 src/main/resources/application-dev.properties
+logs/

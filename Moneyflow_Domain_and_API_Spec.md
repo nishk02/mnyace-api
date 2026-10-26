@@ -897,7 +897,12 @@ com.moneyflow
     │   ├── JwtAuthFilter.java
     │   ├── JwtAuthEntryPoint.java
     │   ├── CorsConfig.java
-    │   └── BaseController.java
+    │   ├── ClientIp.java             Caller address from X-Forwarded-For — see BR-27
+    │   ├── BaseController.java
+    │   └── audit/
+    │       ├── SecurityEvent.java    Catalogue of security events — see BR-28
+    │       ├── SecurityEvents.java   Writes one JSON line per event
+    │       └── RequestIdFilter.java  Server-generated id per request, also returned as X-Request-Id
     ├── email/
     │   └── EmailService.java         Invite + OTP emails (Brevo SMTP)
     ├── exception/
@@ -2105,6 +2110,18 @@ Both endpoints are `permitAll` by necessity — there's no JWT yet to gate them 
 **The client's real IP is read from `X-Forwarded-For`, trusted directly rather than resolved via Tomcat's `RemoteIpValve` or Spring's forwarded-headers machinery**, because the `api` service in `docker-compose.yml` is `expose`d on the Docker network only, never `ports`-published to the host — Caddy is the *only* thing that can ever reach the container directly, so that header can only ever have been set by Caddy itself, never forged by an external caller bypassing it. CI enforces this: the build fails if `docker-compose.yml` ever gives the `api` service a `ports:` entry. Adopting a CDN or other proxy in front of Caddy changes this model and requires configuring Caddy's `trusted_proxies` and restricting the origin to that proxy's address ranges. The IP is the first `X-Forwarded-For` entry; IPv6 addresses are keyed on their `/64` prefix (one subscriber normally owns a whole `/64`, so keying on the full address would give an attacker billions of fresh buckets), and IPv4-mapped IPv6 addresses collapse to plain IPv4.
 
 **Enforcement is a `Filter` (`RateLimitFilter`), not a controller-level check**, registered via `.addFilterBefore(rateLimitFilter, JwtAuthFilter.class)` in both `DevSecurityConfig` and `ProdSecurityConfig` — it runs ahead of JWT parsing entirely, so a throttled request never reaches authentication or service-layer work at all. The filter decides whether a request is in scope from `getServletPath()` — the decoded, normalized path — never the raw request URI. Tomcat and Spring decode the path before routing, so matching the raw string would let `/auth/%73ignin` skip the limiter while still reaching the real endpoint. Reading the email for the per-email bucket requires peeking at the request body before the controller does, which a servlet request's single-read body stream doesn't normally allow; `CachedBodyHttpServletRequest` buffers the body once so both the filter and the downstream `@RequestBody` binding can read it. Because this runs before authentication, the IP bucket is charged *first* and the buffered body is capped at 4 KB: a larger body (declared or chunked) is refused with `413 PAYLOAD_TOO_LARGE` without being read into memory, so one anonymous request cannot exhaust the heap. A `429` response follows the same hand-written JSON envelope pattern as `JwtAuthEntryPoint`'s `401` (written directly to the response, since `GlobalExceptionHandler`'s `@RestControllerAdvice` only catches exceptions from controller-method execution, which a filter runs ahead of) and carries a `Retry-After` header in seconds, computed from Bucket4j's own refill estimate rather than a hardcoded value.
+
+### BR-28: Security Event Logging
+
+Security-relevant actions leave an audit trail separate from ordinary application logs, so "was this account attacked yesterday?" can be answered from a log, not from memory.
+
+**One JSON line per event, using Elastic Common Schema field names**, so dashboards and alert rules in common log tools read it without translation: `@timestamp` (UTC), `event.category` / `event.action` / `event.outcome` (`success` or `failure`) / `event.reason`, `user.id`, `source.ip`, `user_agent.original` (capped at 200 characters), `http.request.id`, `service.name`, `service.environment`, and a small `labels` object for related ids. The events live in one catalogue (`SecurityEvent`): sign-in success and failure (`reason` `unknown_user` or `wrong_password`), `signout_all`, `rate_limited` (`reason` is the bucket that tripped: `signin_ip`, `signin_email`, `refresh_ip`, `invite_ip`, `password_change_user`), `refresh_token_reuse` (with the session family), `password_change` success and failure, `otp_lockout`, and `invite_create`.
+
+**What is never logged:** passwords, access or refresh tokens, OTP codes, invite tokens, and email addresses. People are identified by `user.id` only, a random UUID that is not derived from anything personal and is not a credential: knowing it grants no access, because every request is authorized from the access token and per-record ownership is enforced. The id and the IP address are still personal data (pseudonymous), so the log is treated as such: short retention and restricted access.
+
+**Correlation without trust.** `RequestIdFilter` gives every request a server-generated id, put in the events and returned as `X-Request-Id`. A client-supplied id is ignored, so a caller cannot forge or collide ids. Every client-controlled value in an event (the user agent, for instance) goes through the JSON encoder, so it cannot inject extra lines, and logging never throws into the request it describes.
+
+**Where events go.** Each event is written to the console and to `logs/security.log` (`security-log.file`; `/app/logs/security.log` in the container, on the `moneyflow-logs` volume), rolled at 10 MB or daily, 7 days and 100 MB at most, so the file cannot fill the disk. Docker's own container logs are capped the same way (10 MB × 3 per service). The file is what an off-box shipper reads, because logs kept only on the server disappear with the server and can be altered by whoever compromises it.
 
 ## 10. Screens-to-API Mapping
 

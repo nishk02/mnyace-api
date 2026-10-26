@@ -2,6 +2,8 @@ package com.moneyflow.auth;
 
 import com.moneyflow.shared.exception.ApiException;
 import com.moneyflow.shared.security.JwtUtil;
+import com.moneyflow.shared.security.audit.SecurityEvent;
+import com.moneyflow.shared.security.audit.SecurityEvents;
 import com.moneyflow.shared.security.ratelimit.RateLimiterService;
 import com.moneyflow.shared.util.PasswordRules;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -17,19 +19,22 @@ public class PasswordService {
     private final RefreshTokenService refreshTokenService;
     private final JwtUtil jwtUtil;
     private final RateLimiterService passwordChangeRateLimiter;
+    private final SecurityEvents securityEvents;
 
     public PasswordService(
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             RefreshTokenService refreshTokenService,
             JwtUtil jwtUtil,
-            @Qualifier("passwordChangeRateLimiter") RateLimiterService passwordChangeRateLimiter
+            @Qualifier("passwordChangeRateLimiter") RateLimiterService passwordChangeRateLimiter,
+            SecurityEvents securityEvents
     ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.refreshTokenService = refreshTokenService;
         this.jwtUtil = jwtUtil;
         this.passwordChangeRateLimiter = passwordChangeRateLimiter;
+        this.securityEvents = securityEvents;
     }
 
     /** Changes the password, signs the user out everywhere, and returns a fresh session for the caller. */
@@ -44,6 +49,7 @@ public class PasswordService {
 
         // Without a cap, anyone holding a stolen access token could test password guesses here.
         if (!passwordChangeRateLimiter.consume(userId).allowed()) {
+            securityEvents.record(SecurityEvent.RATE_LIMITED, userId, "password_change_user");
             throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "TOO_MANY_REQUESTS",
                     "Too many attempts. Please wait and try again.");
         }
@@ -53,6 +59,7 @@ public class PasswordService {
 
         // 400, not 401: clients treat a 401 as an expired session and would sign the user out for a typo.
         if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
+            securityEvents.record(SecurityEvent.PASSWORD_CHANGE_FAILED, userId, "wrong_current_password");
             throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_CURRENT_PASSWORD",
                     "Current password is incorrect");
         }
@@ -68,6 +75,7 @@ public class PasswordService {
                 refreshTokenService.issueNewFamily(user, request.deviceLabel());
         String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole());
 
+        securityEvents.record(SecurityEvent.PASSWORD_CHANGED, userId, null);
         return new AuthResponse(accessToken, session.rawToken(), AuthResponse.UserSummary.from(user));
     }
 }
