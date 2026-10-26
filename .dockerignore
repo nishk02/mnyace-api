@@ -8,3 +8,8 @@ target/
 .env
 Dockerfile
 .dockerignore
+.env.*
+*.pem
+*.key
+*.db
+src/main/resources/application-dev.properties
