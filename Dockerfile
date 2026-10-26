@@ -41,7 +41,7 @@ RUN apt-get update \
 # Running as root inside a container is unnecessary risk - if the app were
 # ever compromised, root inside the container makes escalation easier.
 # A dedicated, unprivileged user costs nothing and is standard practice.
-RUN groupadd -r moneyflow && useradd -r -g moneyflow moneyflow
+RUN groupadd -r mnyace && useradd -r -g mnyace mnyace
 
 # Only the built jar crosses over from Stage 1 - none of the source code,
 # Maven cache, or build tools make it into the final image.
@@ -50,9 +50,12 @@ COPY --from=build /app/target/*.jar app.jar
 # The SQLite file itself will live here, mounted in from outside the
 # container (via docker-compose, once we set that up) so it survives
 # container restarts and redeploys instead of vanishing with the container.
-RUN mkdir -p /app/data /app/logs && chown -R moneyflow:moneyflow /app
+RUN mkdir -p /app/data /app/logs && chown -R mnyace:mnyace /app
 
-USER moneyflow
+# Links the image to the repository, so GHCR gives the package the repository's (public) visibility.
+LABEL org.opencontainers.image.source="https://github.com/nishk02/mnyace"
+
+USER mnyace
 
 EXPOSE 8080
 

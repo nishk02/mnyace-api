@@ -10,8 +10,8 @@ x-logging: &default-logging
 
 services:
   api:
-    image: ghcr.io/nishk02/moneyflow-api:latest
-    container_name: moneyflow-api
+    image: ghcr.io/nishk02/mnyace:latest
+    container_name: mnyace-api
     restart: unless-stopped
     logging: *default-logging
     expose:
@@ -19,7 +19,7 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: prod
       JWT_SECRET: ${JWT_SECRET}
-      DB_PATH: /app/data/moneyflow.db
+      DB_PATH: /app/data/mnyace.db
       SECURITY_LOG_FILE: /app/logs/security.log
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
@@ -32,12 +32,12 @@ services:
       # Named volume, not a bind mount - Docker manages the storage location,
       # and it survives `docker compose down` (only `-v` would remove it).
       # This is also exactly what Litestream will watch once that's wired up.
-      - moneyflow-data:/app/data
+      - mnyace-data:/app/data
       # Security events, one JSON line each; a log shipper reads this read-only.
-      - moneyflow-logs:/app/logs
+      - mnyace-logs:/app/logs
   caddy:
     image: caddy:2-alpine
-    container_name: moneyflow-caddy
+    container_name: mnyace-caddy
     restart: unless-stopped
     logging: *default-logging
     ports:
@@ -54,7 +54,7 @@ services:
 
   litestream:
     image: litestream/litestream:0.5.16
-    container_name: moneyflow-litestream
+    container_name: mnyace-litestream
     restart: unless-stopped
     logging: *default-logging
     environment:
@@ -64,13 +64,13 @@ services:
       LITESTREAM_SECRET_ACCESS_KEY: ${LITESTREAM_SECRET_ACCESS_KEY}
     volumes:
       - ./litestream.yml:/etc/litestream.yml
-      - moneyflow-data:/app/data
+      - mnyace-data:/app/data
     command: replicate
     depends_on:
       - api
 
 volumes:
-  moneyflow-data:
-  moneyflow-logs:
+  mnyace-data:
+  mnyace-logs:
   caddy-data:
   caddy-config:
