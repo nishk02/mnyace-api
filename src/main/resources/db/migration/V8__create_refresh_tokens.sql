@@ -6,6 +6,7 @@ CREATE TABLE refresh_tokens
     family_id     TEXT        NOT NULL,
     device_label  TEXT,
     expires_at    TIMESTAMP   NOT NULL,
+    session_started_at TIMESTAMP NOT NULL,
     revoked_at    TIMESTAMP,
     created_at    TIMESTAMP   NOT NULL
 );

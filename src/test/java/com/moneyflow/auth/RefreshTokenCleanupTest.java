@@ -52,6 +52,7 @@ class RefreshTokenCleanupTest extends AuthIntegrationTestBase {
         token.setUser(users.findByEmailIgnoreCase(ADMIN_EMAIL).orElseThrow());
         token.setTokenHash(UUID.randomUUID().toString());
         token.setFamilyId(UUID.randomUUID().toString());
+        token.setSessionStartedAt(LocalDateTime.now());
         token.setExpiresAt(expiresAt);
         token.setRevokedAt(revokedAt);
         return refreshTokens.save(token).getId();

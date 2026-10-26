@@ -41,6 +41,10 @@ public class RefreshToken {
     @Column(name = "expires_at", nullable = false, updatable = false)
     private LocalDateTime expiresAt;
 
+    // When the original sign-in happened; carried across rotations to enforce the absolute session cap.
+    @Column(name = "session_started_at", nullable = false, updatable = false)
+    private LocalDateTime sessionStartedAt;
+
     @Column(name = "revoked_at")
     private LocalDateTime revokedAt;
 

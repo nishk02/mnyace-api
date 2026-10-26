@@ -3,6 +3,7 @@ package com.moneyflow.auth;
 import com.moneyflow.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.Hibernate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,6 +16,9 @@ import java.util.List;
 public class RefreshTokenRevoker {
     private final RefreshTokenRepository refreshTokenRepository;
     private final RefreshTokenIssuer refreshTokenIssuer;
+
+    @Value("${refresh-token.max-session-days}")
+    private long maxSessionDays;
 
     public enum Status { NOT_FOUND, REUSE_DETECTED, DUPLICATE_REQUEST, EXPIRED, VALID }
 
@@ -41,7 +45,8 @@ public class RefreshTokenRevoker {
             revokeFamily(current.getFamilyId(), now);
             return CheckResult.of(Status.REUSE_DETECTED);
         }
-        if (current.getExpiresAt().isBefore(now)) {
+        if (current.getExpiresAt().isBefore(now)
+                || current.getSessionStartedAt().plusDays(maxSessionDays).isBefore(now)) {
             return CheckResult.of(Status.EXPIRED);
         }
         return CheckResult.valid(current.getId());
@@ -63,6 +68,6 @@ public class RefreshTokenRevoker {
         User user = current.getUser();
         Hibernate.initialize(user);
 
-        return refreshTokenIssuer.issue(user, current.getFamilyId(), current.getDeviceLabel());
+        return refreshTokenIssuer.issue(user, current.getFamilyId(), current.getDeviceLabel(), current.getSessionStartedAt());
     }
 }
