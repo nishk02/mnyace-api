@@ -1116,6 +1116,7 @@ The invited person's first step after opening the emailed link — stages their 
 }
 ```
 **Response 200:** `{ "message": "Verification code sent to your email" }` — no token, no user object, because neither exists yet.
+**400:** `VALIDATION_ERROR` — the password must be 8 to 72 characters and at most 72 UTF-8 bytes (BCrypt refuses to encode more and ignores the excess when matching), and must match `confirmPassword`. The same limits apply when changing a password.
 
 ---
 
