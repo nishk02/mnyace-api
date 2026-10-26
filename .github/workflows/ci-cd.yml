@@ -11,6 +11,10 @@ on:
 
 # Cancel an in-flight run for the same branch if a new commit lands - no
 # point finishing a build for code that's already been superseded.
+# Least privilege; the image job adds packages: write itself.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -60,17 +64,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build image (not pushed yet - scan it first)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: ./Dockerfile
@@ -79,7 +83,7 @@ jobs:
           tags: ${{ env.IMAGE }}:scan
 
       - name: Scan image for known CVEs (Trivy)
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:scan
           format: table
@@ -88,7 +92,7 @@ jobs:
           trivyignores: .trivyignore
 
       - name: Push image (only reached if the scan passed)
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           file: ./Dockerfile
@@ -106,7 +110,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Copy compose + Caddy + Litestream config to the VM
-        uses: appleboy/scp-action@v1.0.0
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
         with:
           host: ${{ secrets.LIGHTSAIL_HOST }}
           username: ${{ secrets.LIGHTSAIL_USER }}
@@ -115,7 +119,7 @@ jobs:
           target: ~/moneyflow-deploy
 
       - name: SSH in and roll the containers over
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           API_DOMAIN: ${{ secrets.API_DOMAIN }}
@@ -155,11 +159,11 @@ jobs:
             chmod 600 .env
             docker compose pull
             docker compose up -d
-            # Caddy and Litestream read their mounted config only at startup, and
-            # `up -d` doesn't notice file changes. Apply each one when its content
-            # changed since the last deploy (Litestream restarts cost B2 list calls).
+            # Config is read at startup only: restart a service when its file changed.
+            # Restart, not reload, since the mount keeps the old file; Caddy's is validated first.
             if [ "$(sha256sum < Caddyfile)" != "$(cat .caddyfile.sha 2>/dev/null)" ]; then
-              docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile
+              docker compose run --rm --no-deps -T caddy caddy validate --config /etc/caddy/Caddyfile
+              docker compose restart caddy
               sha256sum < Caddyfile > .caddyfile.sha
             fi
             if [ "$(sha256sum < litestream.yml)" != "$(cat .litestream.sha 2>/dev/null)" ]; then
