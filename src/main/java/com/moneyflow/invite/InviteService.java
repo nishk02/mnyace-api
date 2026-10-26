@@ -5,6 +5,7 @@ import com.moneyflow.auth.*;
 import com.moneyflow.shared.email.EmailService;
 import com.moneyflow.shared.exception.ApiException;
 import com.moneyflow.shared.security.JwtUtil;
+import com.moneyflow.shared.util.PasswordRules;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -76,6 +77,9 @@ public class InviteService {
 
         if (!request.password().equals(request.confirmPassword())) {
             throw ApiException.badRequest("Passwords do not match");
+        }
+        if (PasswordRules.isTooLong(request.password())) {
+            throw ApiException.badRequest("Password is too long");
         }
 
         invite.setPendingFirstName(request.firstName());

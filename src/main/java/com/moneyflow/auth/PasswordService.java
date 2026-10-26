@@ -3,19 +3,15 @@ package com.moneyflow.auth;
 import com.moneyflow.shared.exception.ApiException;
 import com.moneyflow.shared.security.JwtUtil;
 import com.moneyflow.shared.security.ratelimit.RateLimiterService;
+import com.moneyflow.shared.util.PasswordRules;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-
 @Service
 public class PasswordService {
-    // BCrypt only reads the first 72 bytes, so anything longer would silently weaken the password
-    private static final int MAX_PASSWORD_BYTES = 72;
-
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final RefreshTokenService refreshTokenService;
@@ -42,7 +38,7 @@ public class PasswordService {
         if (!request.newPassword().equals(request.confirmNewPassword())) {
             throw ApiException.badRequest("Passwords do not match");
         }
-        if (request.newPassword().getBytes(StandardCharsets.UTF_8).length > MAX_PASSWORD_BYTES) {
+        if (PasswordRules.isTooLong(request.newPassword())) {
             throw ApiException.badRequest("New password is too long");
         }
 
