@@ -1,7 +1,7 @@
 opencollection: 1.0.0
 
 info:
-  name: Moneyflow API
+  name: MnyAce API
 config:
   proxy:
     inherit: true

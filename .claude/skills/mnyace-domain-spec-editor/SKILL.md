@@ -1,11 +1,11 @@
 ---
-name: moneyflow-domain-spec-editor
-description: Use when editing Moneyflow_Domain_and_API_Spec.md — covers syncing from the device, the push/verify procedure over the device bridge, and the pre-MVP consolidate-don't-append editing philosophy.
+name: mnyace-domain-spec-editor
+description: Use when editing Mnyace_Domain_and_API_Spec.md — covers syncing from the device, the push/verify procedure over the device bridge, and the pre-MVP consolidate-don't-append editing philosophy.
 ---
 
-# Editing the Moneyflow domain spec
+# Editing the MnyAce domain spec
 
-The spec lives at `Moneyflow_Domain_and_API_Spec.md` at the root of this repo. There is no in-place patch — every change means: sync, edit a local copy, push, verify.
+The spec lives at `Mnyace_Domain_and_API_Spec.md` at the root of this repo. There is no in-place patch — every change means: sync, edit a local copy, push, verify.
 
 ## 1. Sync before editing, every session
 

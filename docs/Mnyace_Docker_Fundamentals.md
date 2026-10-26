@@ -1,4 +1,4 @@
-# Moneyflow — Docker Fundamentals (Applied)
+# MnyAce — Docker Fundamentals (Applied)
 
 **What this document is:** the core Docker concepts you need to work with this project end to end, explained through the actual files already sitting in this repo rather than generic examples. If a Docker term ever feels fuzzy again, this is the doc to come back to before re-deriving it from scratch.
 
@@ -41,7 +41,7 @@ This project's `Dockerfile` is a real, working example of the standard shape:
 
 ## 4. Registries — GHCR is npm, one layer down
 
-Once an image is built, it needs somewhere to live so other machines (like the Lightsail VM) can fetch it without rebuilding from source every time. That's what GHCR is — `ghcr.io/nishk02/moneyflow-api` is exactly analogous to a scoped npm package name. CI's `docker push` after a successful build/scan is `npm publish`. The VM's `docker compose pull` is `npm install` for that image. Whether that package is public or private works exactly like npm's public/private scoping too — which is the actual GHCR task still sitting on the backlog.
+Once an image is built, it needs somewhere to live so other machines (like the Lightsail VM) can fetch it without rebuilding from source every time. That's what GHCR is — `ghcr.io/nishk02/mnyace` is exactly analogous to a scoped npm package name. CI's `docker push` after a successful build/scan is `npm publish`. The VM's `docker compose pull` is `npm install` for that image. Whether that package is public or private works exactly like npm's public/private scoping too — which is the actual GHCR task still sitting on the backlog.
 
 ---
 
@@ -60,21 +60,21 @@ Reading this project's `docker-compose.yml` with that lens:
 ```yaml
 services:
   api:
-    image: ghcr.io/nishk02/moneyflow-api:latest   # which image to run
+    image: ghcr.io/nishk02/mnyace:latest   # which image to run
     expose:
       - "8080"                                     # reachable by other containers, not the host
     environment:
       SPRING_PROFILES_ACTIVE: prod                 # env vars, same as `docker run -e`
       JWT_SECRET: ${JWT_SECRET}
-      DB_PATH: /app/data/moneyflow.db
+      DB_PATH: /app/data/mnyace.db
     volumes:
-      - moneyflow-data:/app/data                    # mount a named volume, same as `docker run -v`
+      - mnyace-data:/app/data                    # mount a named volume, same as `docker run -v`
 
   caddy: ...
   litestream: ...
 
 volumes:
-  moneyflow-data:      # declaring this here is the equivalent of `docker volume create moneyflow-data`
+  mnyace-data:      # declaring this here is the equivalent of `docker volume create mnyace-data`
   caddy-data:
   caddy-config:
 ```
@@ -90,7 +90,7 @@ volumes:
 
 ## 7. Networking — service names are hostnames
 
-Every service in the same Compose file automatically joins a shared private network, and can reach every other service **by its service name, resolved like a hostname.** This is why `Caddyfile` says `reverse_proxy api:8080` — `api` isn't a placeholder, Compose genuinely makes that name resolvable, scoped to a private network only these containers can see. It's the same idea as public DNS resolving `api.mnyflo.com`, just private and automatic instead of something you configured on a registrar.
+Every service in the same Compose file automatically joins a shared private network, and can reach every other service **by its service name, resolved like a hostname.** This is why `Caddyfile` says `reverse_proxy api:8080` — `api` isn't a placeholder, Compose genuinely makes that name resolvable, scoped to a private network only these containers can see. It's the same idea as public DNS resolving `api.mnyace.com`, just private and automatic instead of something you configured on a registrar.
 
 ---
 
