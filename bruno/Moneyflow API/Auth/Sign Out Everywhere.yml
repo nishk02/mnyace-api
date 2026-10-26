@@ -1,0 +1,27 @@
+info:
+  name: Sign Out Everywhere
+  type: http
+  seq: 6
+
+http:
+  method: DELETE
+  url: "{{BASE_URL}}/api/sessions"
+  headers:
+    - name: X-Client-Platform
+      value: web
+      disabled: true
+  auth: inherit
+
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        // Every refresh token is revoked; the access token in hand still works until it expires.
+        if (res.status === 200) bru.setEnvVar("REFRESH_TOKEN", "");
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true
