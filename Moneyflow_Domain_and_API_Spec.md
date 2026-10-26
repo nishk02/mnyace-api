@@ -788,6 +788,7 @@ com.moneyflow
 │   ├── AuthController.java           signin, refresh, logout — see invite/ for onboarding
 │   ├── PasswordController.java       PUT /api/users/me/password
 │   ├── PasswordService.java          change password: verify, rate-limit, revoke every session, issue a fresh one
+│   ├── SessionController.java        DELETE /api/sessions — sign out of every device
 │   ├── AuthService.java
 │   ├── AdminBootstrapRunner.java     Seeds the first ADMIN from env vars at startup
 │   ├── RefreshTokenService.java      Thin orchestrator — hash, dispatch to Revoker/Issuer, nothing @Transactional
@@ -1041,6 +1042,16 @@ Rotates the presented `refreshToken`: the old one is revoked, a new one is issue
 Revokes every active `RefreshToken` sharing the presented token's `familyId` — i.e. logs out that one device, not every device the user is signed into elsewhere. The JWT itself isn't and can't be revoked (it's self-describing and stateless); it simply expires naturally within its own 15-minute lifetime, by which point no refresh is possible to extend the session further.
 
 **Response 200:** `{ "message": "Logged out successfully" }` — web also carries `Set-Cookie: refreshToken=; Path=/auth; Max-Age=0; HttpOnly; Secure; SameSite=Strict`
+
+---
+
+#### DELETE /sessions — requires JWT
+Signs the caller out of **every** device: all of their active `RefreshToken`s are revoked, across every `familyId`. Other users are never affected. It lives under `/api`, not `/auth`, because `/auth/**` is public and this must require a valid login. Web clients (`X-Client-Platform: web`) also get the refresh cookie cleared, as on logout.
+
+The access token already issued cannot be revoked (it is stateless) and keeps working until it expires, at most 15 minutes; no new one can be obtained without signing in again.
+
+**Response 200:** `{ "message": "Signed out of all devices" }`
+**401:** missing or invalid access token
 
 ---
 
@@ -2059,7 +2070,7 @@ A `RefreshToken` is opaque (32 random bytes, URL-safe base64) and never a JWT �
 
 **Duplicate and concurrent refreshes are not treated as theft.** A client that fires `/auth/refresh` twice at once (a tab resuming, two parallel requests hitting an expired JWT) presents the same token twice. Rotations of one token are serialized in-process (a striped lock keyed on the token hash — Moneyflow is a single instance, and SQLite fails rather than waits when two transactions try to upgrade a read to a write). The first rotation wins; a token that was rotated within the last 5 seconds is refused with the same generic `401` but its family is left intact, so the winner's new token keeps working. Presenting a rotated token *after* that window is treated as reuse and revokes the family as described above. If the database is still busy with another writer, the request answers `503` with `Retry-After`, never `500`.
 
-**A session also has an absolute lifetime.** Sliding expiry alone would let a stolen token on a lost or dormant device stay alive forever, because only the thief ever refreshes it, so nothing clashes and reuse detection never fires. Every token therefore carries `sessionStartedAt`, the time of the original password sign-in, copied unchanged into each rotated token. A token's `expiresAt` is the earlier of 30 days from issue and `sessionStartedAt` + `refresh-token.max-session-days` (90), and rotation additionally refuses any session older than the cap, so lowering the setting applies to sessions that are already running. Past the cap the response is the same generic `401`, and the user signs in with their password again. A password change also ends every other session at once, while the device that made the change gets a fresh one.
+**A session also has an absolute lifetime.** Sliding expiry alone would let a stolen token on a lost or dormant device stay alive forever, because only the thief ever refreshes it, so nothing clashes and reuse detection never fires. Every token therefore carries `sessionStartedAt`, the time of the original password sign-in, copied unchanged into each rotated token. A token's `expiresAt` is the earlier of 30 days from issue and `sessionStartedAt` + `refresh-token.max-session-days` (90), and rotation additionally refuses any session older than the cap, so lowering the setting applies to sessions that are already running. Past the cap the response is the same generic `401`, and the user signs in with their password again. `DELETE /sessions` ends every session of the caller at once, which is the remedy for a lost device, and a password change does the same while the device that made the change gets a fresh session.
 
 **Revoked tokens are kept until they have expired.** Reuse detection depends on being able to tell "this token never existed" apart from "this token existed but was already used" — deleting a revoked row while it could still be replayed would make the two indistinguishable and silently disable the mechanism. The row stays, with `revokedAt` set, as the record reuse-detection reads from. A daily job (`RefreshTokenCleanupJob`, 03:30 IST, `refresh-token.cleanup.*`) deletes only rows that expired more than 7 days ago: an expired token cannot be used anyway, so removing it loses nothing and a replay still gets the same generic `401`. Revoked-but-unexpired rows are never touched. The job runs inside the app (single instance, idempotent delete, catches up on the next run if one is missed). A future "active sessions" screen could be built from this same table.
 

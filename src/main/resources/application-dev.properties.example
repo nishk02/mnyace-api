@@ -1,5 +1,9 @@
 # Copy this file to application-dev.properties and fill in your values
 # application-dev.properties is gitignored — never commit it
+#
+# Secrets live in the dotenv file in the repo root, loaded in dev by application.properties.
+# Plain KEY=value lines (no quotes, no export). Keys: MAIL_USERNAME, MAIL_PASSWORD, ADMIN_EMAIL,
+# ADMIN_PASSWORD, TEST_USER_EMAIL, TEST_USER_PASSWORD, JWT_SECRET. Reference them as ${KEY} below.
 
 spring.profiles.active=dev
 
