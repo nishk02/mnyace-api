@@ -36,7 +36,7 @@ public class RefreshTokenService {
     }
 
     public RefreshTokenIssuer.IssuedRefreshToken issueNewFamily(User user, String deviceLabel) {
-        return refreshTokenIssuer.issue(user, UUID.randomUUID().toString(), deviceLabel);
+        return refreshTokenIssuer.issue(user, UUID.randomUUID().toString(), deviceLabel, LocalDateTime.now());
     }
 
     public RefreshTokenIssuer.IssuedRefreshToken rotate(String presentedRawToken) {
