@@ -5,6 +5,8 @@ import com.moneyflow.auth.*;
 import com.moneyflow.shared.email.EmailService;
 import com.moneyflow.shared.exception.ApiException;
 import com.moneyflow.shared.security.JwtUtil;
+import com.moneyflow.shared.security.audit.SecurityEvent;
+import com.moneyflow.shared.security.audit.SecurityEvents;
 import com.moneyflow.shared.util.PasswordRules;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -15,6 +17,7 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +36,7 @@ public class InviteService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final RefreshTokenService refreshTokenService;
+    private final SecurityEvents securityEvents;
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Value("${app.max-users:50}")
@@ -55,6 +59,7 @@ public class InviteService {
         invite.setExpiresAt(LocalDateTime.now().plusDays(VALIDITY_DAYS));
 
         Invite saved = inviteRepository.save(invite);
+        securityEvents.record(SecurityEvent.INVITE_CREATED, adminUserId, null, Map.of("invite_id", saved.getId()));
         emailService.sendInviteEmail(saved.getEmail(), saved.getToken());
 
         long registeredMembers = userRepository.countByRole("MEMBER");
@@ -117,6 +122,7 @@ public class InviteService {
 
         // Spend the guess before checking it, so a burst of parallel requests is capped too.
         if (inviteRepository.consumeOtpAttempt(invite.getId(), MAX_OTP_ATTEMPTS) == 0) {
+            securityEvents.record(SecurityEvent.OTP_LOCKOUT, null, "max_attempts_reached", Map.of("invite_id", invite.getId()));
             throw ApiException.badRequest("Too many incorrect attempts. Ask for a new invite.");
         }
 

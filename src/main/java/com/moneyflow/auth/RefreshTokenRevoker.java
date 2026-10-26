@@ -1,6 +1,8 @@
 package com.moneyflow.auth;
 
 import com.moneyflow.shared.exception.ApiException;
+import com.moneyflow.shared.security.audit.SecurityEvent;
+import com.moneyflow.shared.security.audit.SecurityEvents;
 import lombok.RequiredArgsConstructor;
 import org.hibernate.Hibernate;
 import org.springframework.beans.factory.annotation.Value;
@@ -10,12 +12,14 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 public class RefreshTokenRevoker {
     private final RefreshTokenRepository refreshTokenRepository;
     private final RefreshTokenIssuer refreshTokenIssuer;
+    private final SecurityEvents securityEvents;
 
     @Value("${refresh-token.max-session-days}")
     private long maxSessionDays;
@@ -43,6 +47,8 @@ public class RefreshTokenRevoker {
                 return CheckResult.of(Status.DUPLICATE_REQUEST);
             }
             revokeFamily(current.getFamilyId(), now);
+            securityEvents.record(SecurityEvent.REFRESH_TOKEN_REUSE, current.getUser().getId(), "family_revoked",
+                    Map.of("session_family", current.getFamilyId()));
             return CheckResult.of(Status.REUSE_DETECTED);
         }
         if (current.getExpiresAt().isBefore(now)

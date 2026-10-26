@@ -2,6 +2,8 @@ package com.moneyflow.auth;
 
 import com.moneyflow.shared.dto.ApiResponse;
 import com.moneyflow.shared.security.BaseController;
+import com.moneyflow.shared.security.audit.SecurityEvent;
+import com.moneyflow.shared.security.audit.SecurityEvents;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
@@ -16,13 +18,16 @@ import org.springframework.web.bind.annotation.RestController;
 public class SessionController extends BaseController {
     private final RefreshTokenService refreshTokenService;
     private final RefreshTokenCookieWriter cookieWriter;
+    private final SecurityEvents securityEvents;
 
     /** Signs the caller out of every device by revoking all of their refresh tokens. */
     @DeleteMapping
     public ResponseEntity<ApiResponse<Void>> signOutEverywhere(
             @RequestHeader(value = "X-Client-Platform", required = false) String platform
     ) {
-        refreshTokenService.revokeAllForUser(getCurrentUserId());
+        String userId = getCurrentUserId();
+        refreshTokenService.revokeAllForUser(userId);
+        securityEvents.record(SecurityEvent.SIGNOUT_ALL, userId, null);
 
         ResponseEntity.BodyBuilder builder = ResponseEntity.ok();
         if (cookieWriter.isWeb(platform)) {
