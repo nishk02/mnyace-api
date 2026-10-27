@@ -6,6 +6,7 @@ import com.mnyace.goal.GoalRepository;
 import com.mnyace.shared.exception.ApiErrorCodes;
 import com.mnyace.shared.exception.ApiException;
 import com.mnyace.shared.util.AppClock;
+import com.mnyace.shared.util.Money;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -183,12 +184,12 @@ public class GoalAllocationService {
      */
     public BigDecimal sumWithdrawalsByDateRange(String userId, LocalDate from, LocalDate to) {
         BigDecimal result = allocationRepository.sumByUserIdAndDateRange(userId, from, to);
-        return result != null ? result : BigDecimal.ZERO;
+        return Money.round(result);
     }
 
     public BigDecimal sumWithdrawalsByCalendarMonth(String userId, int year, int month) {
         BigDecimal result = allocationRepository.sumByUserIdAndCalendarMonth(userId, year, month, AppClock.today());
-        return result != null ? result : BigDecimal.ZERO;
+        return Money.round(result);
     }
 
     private String formatAmount(BigDecimal amount) {

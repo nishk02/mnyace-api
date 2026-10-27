@@ -1,6 +1,7 @@
 package com.mnyace.goal;
 
 import com.mnyace.shared.util.AppClock;
+import com.mnyace.shared.util.Money;
 import com.mnyace.transaction.TransactionGoalAllocationRepository;
 import com.mnyace.transaction.TransactionRepository;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,6 @@ public class GoalCreditService {
                 goal.getId(), now.getYear(), now.getMonthValue());
         BigDecimal withdrawn = transactionGoalAllocationRepository.sumByGoalIdAndCalendarMonth(
                 goal.getId(), now.getYear(), now.getMonthValue());
-        return deposited.subtract(withdrawn);
+        return Money.round(deposited).subtract(Money.round(withdrawn));
     }
 }

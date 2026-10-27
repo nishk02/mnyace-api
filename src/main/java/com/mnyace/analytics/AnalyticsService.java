@@ -2,6 +2,7 @@ package com.mnyace.analytics;
 
 import com.mnyace.shared.exception.ApiException;
 import com.mnyace.shared.util.AppClock;
+import com.mnyace.shared.util.Money;
 import com.mnyace.transaction.GoalAllocationService;
 import com.mnyace.transaction.TransactionRepository;
 import com.mnyace.transaction.TransactionType;
@@ -79,18 +80,14 @@ public class AnalyticsService {
     private BigDecimal sumByTypes(String userId, LocalDate from, LocalDate to, List<TransactionType> types) {
         BigDecimal result = transactionRepository.sumByUserIdAndTypesAndDateRange(userId, types, from, to);
 
-        return result != null ? result : BigDecimal.ZERO;
+        return Money.round(result);
     }
 
     private BigDecimal sumTransferToGoal(String userId, LocalDate from, LocalDate to) {
         BigDecimal grossDeposits = transactionRepository.sumTransferToGoalByDateRange(userId, from, to);
-        if (grossDeposits == null) {
-            grossDeposits = BigDecimal.ZERO;
-        }
-
         BigDecimal withdrawals = goalAllocationService.sumWithdrawalsByDateRange(userId, from, to);
 
-        return grossDeposits.subtract(withdrawals);
+        return Money.round(grossDeposits).subtract(withdrawals);
     }
 
     private BigDecimal computeRate(BigDecimal part, BigDecimal total) {
