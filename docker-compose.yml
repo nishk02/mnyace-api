@@ -13,6 +13,7 @@ services:
     image: ghcr.io/nishk02/mnyace-api:latest
     container_name: mnyace-api
     restart: unless-stopped
+    mem_limit: 900m
     logging: *default-logging
     expose:
       - "8080"
@@ -39,6 +40,7 @@ services:
     image: caddy:2-alpine
     container_name: mnyace-caddy
     restart: unless-stopped
+    mem_limit: 128m
     logging: *default-logging
     ports:
       - "80:80"
@@ -56,6 +58,7 @@ services:
     image: litestream/litestream:0.5.16
     container_name: mnyace-litestream
     restart: unless-stopped
+    mem_limit: 192m
     logging: *default-logging
     environment:
       LITESTREAM_BUCKET: ${LITESTREAM_BUCKET}
