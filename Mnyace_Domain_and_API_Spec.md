@@ -2123,6 +2123,8 @@ Security-relevant actions leave an audit trail separate from ordinary applicatio
 
 **Where events go.** Each event is written to the console and to `logs/security.log` (`security-log.file`; `/app/logs/security.log` in the container, on the `mnyace-logs` volume), rolled at 10 MB or daily, 7 days and 100 MB at most, so the file cannot fill the disk. Docker's own container logs are capped the same way (10 MB × 3 per service). The file is what an off-box shipper reads, because logs kept only on the server disappear with the server and can be altered by whoever compromises it.
 
+**Shipping.** A `log-shipper` container (Fluent Bit, version pinned in `docker-compose.yml`) reads `security.log` read-only and forwards each line over HTTPS to Axiom (dataset `mnyace-security`, 30 days of retention on its free plan). It remembers how far it has read, so a restart neither resends nor skips lines, and it keeps retrying while Axiom is unreachable, while the local file keeps the events in the meantime. The application never talks to Axiom, so an outage there cannot slow a request, and only the shipper holds the ingest token. The shipper container has no published ports, a read-only filesystem, no extra capabilities and a 64 MB memory cap, and CI validates its config with `--dry-run` before any deploy. It needs three secrets: `AXIOM_HOST` (the edge domain shown for the account), `AXIOM_DATASET` and `AXIOM_TOKEN` (ingest-only).
+
 ## 10. Screens-to-API Mapping
 
 | Screen (Figma page) | API calls made |
