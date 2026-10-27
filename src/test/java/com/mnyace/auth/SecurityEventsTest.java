@@ -78,7 +78,7 @@ class SecurityEventsTest extends AuthIntegrationTestBase {
 
         for (String line : lines()) {
             JsonNode event = parse(line);
-            assertThat(event.path("@timestamp").asText()).matches("\\d{4}-\\d{2}-\\d{2}T.*Z");
+            assertThat(event.path("@timestamp").asText()).matches("\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z");
             assertThat(event.at("/event/category").asText()).isNotBlank();
             assertThat(event.at("/event/action").asText()).isNotBlank();
             assertThat(event.at("/event/outcome").asText()).isIn("success", "failure");

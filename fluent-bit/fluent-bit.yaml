@@ -1,0 +1,40 @@
+# Ships the security event log to Axiom. Reads the app's JSON lines, never writes to them.
+service:
+  flush: 5
+  log_level: info
+
+parsers:
+  - name: security_json
+    format: json
+    time_key: "@timestamp"
+    time_format: "%Y-%m-%dT%H:%M:%S.%LZ"
+    time_keep: on
+
+pipeline:
+  inputs:
+    - name: tail
+      path: /var/log/mnyace/security.log
+      parser: security_json
+      tag: security
+      # remembers how far it has read, so a restart neither resends nor skips lines
+      db: /var/lib/fluent-bit/security.db
+      read_from_head: true
+      refresh_interval: 10
+      rotate_wait: 30
+
+  outputs:
+    - name: http
+      match: security
+      host: ${AXIOM_HOST}
+      port: 443
+      uri: /v1/ingest/${AXIOM_DATASET}
+      format: json
+      json_date_key: _time
+      json_date_format: iso8601
+      compress: gzip
+      header:
+        - Authorization Bearer ${AXIOM_TOKEN}
+        - Content-Type application/json
+      tls: on
+      tls.verify: on
+      retry_limit: 10

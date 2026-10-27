@@ -14,6 +14,8 @@ import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -25,6 +27,9 @@ import java.util.Map;
 public class SecurityEvents {
     private static final Logger LOG = LoggerFactory.getLogger("SECURITY_EVENTS");
     private static final int MAX_USER_AGENT_LENGTH = 200;
+    // fixed millisecond precision, so a log shipper can parse every timestamp with one format
+    private static final DateTimeFormatter TIMESTAMP =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC);
 
     private final ObjectMapper objectMapper;
     private final String serviceName;
@@ -53,7 +58,7 @@ public class SecurityEvents {
 
     private Map<String, Object> document(SecurityEvent event, String userId, String reason, Map<String, String> labels) {
         Map<String, Object> doc = new LinkedHashMap<>();
-        doc.put("@timestamp", Instant.now().toString());
+        doc.put("@timestamp", TIMESTAMP.format(Instant.now()));
 
         Map<String, Object> eventFields = new LinkedHashMap<>();
         eventFields.put("category", event.category());

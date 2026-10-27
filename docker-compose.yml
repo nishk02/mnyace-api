@@ -69,8 +69,32 @@ services:
     depends_on:
       - api
 
+  # Sends the security event log to Axiom. Read-only on the logs, no ports, tight limits.
+  log-shipper:
+    image: fluent/fluent-bit:5.1.3
+    container_name: mnyace-log-shipper
+    restart: unless-stopped
+    logging: *default-logging
+    entrypoint: ["/fluent-bit/bin/fluent-bit"]
+    command: ["-c", "/fluent-bit/etc/fluent-bit.yaml"]
+    environment:
+      AXIOM_HOST: ${AXIOM_HOST}
+      AXIOM_DATASET: ${AXIOM_DATASET}
+      AXIOM_TOKEN: ${AXIOM_TOKEN}
+    volumes:
+      - ./fluent-bit:/fluent-bit/etc:ro
+      - mnyace-logs:/var/log/mnyace:ro
+      - mnyace-shipper-state:/var/lib/fluent-bit
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+
 volumes:
   mnyace-data:
   mnyace-logs:
+  mnyace-shipper-state:
   caddy-data:
   caddy-config:
