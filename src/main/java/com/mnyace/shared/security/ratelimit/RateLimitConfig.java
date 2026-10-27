@@ -48,4 +48,12 @@ public class RateLimitConfig {
     ) {
         return new RateLimiterService(capacity, Duration.ofSeconds(periodSeconds));
     }
+
+    @Bean
+    public RateLimiterService apiIpRateLimiter(
+            @Value("${rate-limit.api.ip.capacity}") long capacity,
+            @Value("${rate-limit.api.ip.period-seconds}") long periodSeconds
+    ) {
+        return new RateLimiterService(capacity, Duration.ofSeconds(periodSeconds));
+    }
 }

@@ -25,7 +25,7 @@ import java.util.HexFormat;
 import java.util.regex.Pattern;
 
 /**
- * Rate-limits POST /auth/signin, POST /auth/refresh and the invite POSTs, ahead of
+ * Rate-limits POST /auth/signin, POST /auth/refresh, the invite POSTs and every /api/** call, ahead of
  * JwtAuthFilter. These are permitAll (no JWT to gate them) — exactly why
  * they're worth protecting here: signin is the one place a password can be
  * guessed at all, and refresh is a DoS target because it does real work
@@ -36,7 +36,8 @@ import java.util.regex.Pattern;
  * source hammering many accounts (IP), and one account being guessed from
  * many sources (email). Refresh only gets an IP bucket; a stolen/guessed
  * refresh token is already caught by reuse-detection (BR-26), so this is
- * purely a request-volume backstop.
+ * purely a request-volume backstop. /api/** gets one generous IP bucket as a flood
+ * guard; it counts unauthenticated requests too, since this filter runs before the JWT check.
  */
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
@@ -51,6 +52,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final RateLimiterService signinEmailRateLimiter;
     private final RateLimiterService refreshIpRateLimiter;
     private final RateLimiterService inviteIpRateLimiter;
+    private final RateLimiterService apiIpRateLimiter;
     private final ObjectMapper objectMapper;
     private final SecurityEvents securityEvents;
 
@@ -59,6 +61,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @Qualifier("signinEmailRateLimiter") RateLimiterService signinEmailRateLimiter,
             @Qualifier("refreshIpRateLimiter") RateLimiterService refreshIpRateLimiter,
             @Qualifier("inviteIpRateLimiter") RateLimiterService inviteIpRateLimiter,
+            @Qualifier("apiIpRateLimiter") RateLimiterService apiIpRateLimiter,
             ObjectMapper objectMapper,
             SecurityEvents securityEvents
     ) {
@@ -66,6 +69,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.signinEmailRateLimiter = signinEmailRateLimiter;
         this.refreshIpRateLimiter = refreshIpRateLimiter;
         this.inviteIpRateLimiter = inviteIpRateLimiter;
+        this.apiIpRateLimiter = apiIpRateLimiter;
         this.objectMapper = objectMapper;
         this.securityEvents = securityEvents;
     }
@@ -79,6 +83,17 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // getServletPath(), not getRequestURI(): the latter is the raw, still-encoded path, so
         // /auth/%73ignin would skip this filter yet be decoded and routed to /auth/signin.
         String path = request.getServletPath();
+
+        if (path.startsWith("/api/") && !"OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            RateLimiterService.Decision decision = apiIpRateLimiter.consume(bucketKeyFor(ClientIp.of(request)));
+            if (!decision.allowed()) {
+                rejectWithTooManyRequests(response, decision.retryAfterSeconds(), "api_ip");
+                return;
+            }
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         boolean isSignin = isPost(request) && "/auth/signin".equals(path);
         boolean isRefresh = isPost(request) && "/auth/refresh".equals(path);
 
