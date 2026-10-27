@@ -12,6 +12,7 @@ import com.mnyace.goal.GoalRepository;
 import com.mnyace.goal.GoalResponse;
 import com.mnyace.shared.exception.ApiException;
 import com.mnyace.shared.util.AppClock;
+import com.mnyace.shared.util.Money;
 import com.mnyace.transaction.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -22,7 +23,6 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -80,12 +80,12 @@ public class DashboardService {
 
         // Saved this month
         LocalDate now = AppClock.today();
-        BigDecimal grossSavedThisMonth = Optional.ofNullable(transactionRepository
+        BigDecimal grossSavedThisMonth = Money.round(transactionRepository
                 .sumTransferToGoalByCalendarMonth(
                         userId,
                         now.getYear(),
                         now.getMonthValue(),
-                        AppClock.today())).orElse(BigDecimal.ZERO);
+                        AppClock.today()));
 
         BigDecimal withdrawalsThisMonth = goalAllocationService
                 .sumWithdrawalsByCalendarMonth(userId, now.getYear(), now.getMonthValue());
@@ -93,20 +93,20 @@ public class DashboardService {
         BigDecimal savedThisMonth = grossSavedThisMonth.subtract(withdrawalsThisMonth);
 
         // Balance percentage
-        BigDecimal totalIncomeThisMonth = transactionRepository
+        BigDecimal totalIncomeThisMonth = Money.round(transactionRepository
                 .sumByUserIdAndTypesAndMonth(
                         userId,
                         List.of(TransactionType.INCOME),
                         now.getYear(),
-                        now.getMonthValue());
+                        now.getMonthValue()));
 
-        BigDecimal openingBalanceThisMonth = transactionRepository
+        BigDecimal openingBalanceThisMonth = Money.round(transactionRepository
                 .sumByUserIdAndTypesAndCategoryAndMonth(
                         userId,
                         List.of(TransactionType.SETTLEMENT),
                         Category.OPENING_BALANCE_CATEGORY_ID,
                         now.getYear(),
-                        now.getMonthValue());
+                        now.getMonthValue()));
 
         BigDecimal balancePercentageBase = totalIncomeThisMonth.add(openingBalanceThisMonth);
 
