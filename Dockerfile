@@ -65,4 +65,4 @@ ENV SPRING_PROFILES_ACTIVE=prod
 # MaxRAMPercentage lets the JVM size its heap relative to whatever memory
 # limit Docker actually gives this container, rather than a hardcoded -Xmx
 # that would silently need updating every time you resize the instance.
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=70.0", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=60.0", "-XX:+ExitOnOutOfMemoryError", "-jar", "app.jar"]
