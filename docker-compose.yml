@@ -13,6 +13,10 @@ services:
     image: ghcr.io/nishk02/mnyace-api:latest
     container_name: mnyace-api
     restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     mem_limit: 900m
     logging: *default-logging
     expose:
@@ -40,6 +44,12 @@ services:
     image: caddy:2-alpine
     container_name: mnyace-caddy
     restart: unless-stopped
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
     mem_limit: 128m
     logging: *default-logging
     ports:
@@ -58,6 +68,15 @@ services:
     image: litestream/litestream:0.5.16
     container_name: mnyace-litestream
     restart: unless-stopped
+    # Runs as root on a volume owned by the api user: it must override file access and chown its state dir.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
     mem_limit: 192m
     logging: *default-logging
     environment:
