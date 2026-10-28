@@ -1,5 +1,21 @@
+{
+    servers {
+        timeouts {
+            read_header 10s
+            read_body 30s
+            write 30s
+            idle 2m
+        }
+        max_header_size 16KB
+    }
+}
+
 {$API_DOMAIN} {
     header Strict-Transport-Security "max-age=31536000"
+
+    request_body {
+        max_size 1MB
+    }
 
     reverse_proxy api:8080
 

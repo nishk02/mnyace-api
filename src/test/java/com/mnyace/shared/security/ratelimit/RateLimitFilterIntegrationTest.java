@@ -25,7 +25,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("prod")
 @TestPropertySource(properties = {
         "spring.datasource.url=jdbc:sqlite:target/rate-limit-it.db",
-        "jwt.secret=test-secret-test-secret-test-secret-123456"
+        "jwt.secret=test-secret-test-secret-test-secret-123456",
+        // near-zero refill, so a slow runner cannot earn tokens back mid-test
+        "rate-limit.api.ip.period-seconds=86400"
 })
 class RateLimitFilterIntegrationTest {
     @LocalServerPort
@@ -42,6 +44,9 @@ class RateLimitFilterIntegrationTest {
 
     @Value("${rate-limit.invite.ip.capacity}")
     private int inviteIpCapacity;
+
+    @Value("${rate-limit.api.ip.capacity}")
+    private int apiIpCapacity;
 
     private final HttpClient client = HttpClient.newHttpClient();
 
@@ -111,6 +116,25 @@ class RateLimitFilterIntegrationTest {
         assertThat(post("/auth/signin", "10.1.0.6", huge).statusCode()).isEqualTo(429);
     }
 
+    @Test
+    void api_unauthenticatedFlood_isRateLimitedPerIp() throws Exception {
+        for (int i = 0; i < apiIpCapacity; i++) {
+            assertThat(get("/api/dashboard", "10.3.0.1").statusCode()).isNotEqualTo(429);
+        }
+        HttpResponse<String> limited = get("/api/dashboard", "10.3.0.1");
+        assertThat(limited.statusCode()).isEqualTo(429);
+        assertThat(limited.headers().firstValue("Retry-After")).isPresent();
+        assertThat(get("/api/dashboard", "10.3.0.2").statusCode()).as("another IP is unaffected").isNotEqualTo(429);
+    }
+
+    @Test
+    void api_percentEncodedPath_isRateLimitedPerIp() throws Exception {
+        for (int i = 0; i < apiIpCapacity; i++) {
+            assertThat(get("/api/%64ashboard", "10.3.0.3").statusCode()).isNotEqualTo(429);
+        }
+        assertThat(get("/api/%64ashboard", "10.3.0.3").statusCode()).isEqualTo(429);
+    }
+
     private void assertLimitedAfter(
             int capacity, String path, String ip, java.util.function.IntFunction<String> body
     ) throws Exception {
@@ -135,6 +159,14 @@ class RateLimitFilterIntegrationTest {
                 .header("Content-Type", "application/json")
                 .header("X-Forwarded-For", forwardedFor)
                 .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build();
+        return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private HttpResponse<String> get(String rawPath, String forwardedFor) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + rawPath))
+                .header("X-Forwarded-For", forwardedFor)
+                .GET()
                 .build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
     }
