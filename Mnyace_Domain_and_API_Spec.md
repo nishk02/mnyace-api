@@ -979,7 +979,7 @@ All endpoints require `Authorization: Bearer {jwt}` except `/auth/**`.
 
 ### Input Limits
 
-Requests beyond these are refused with `400 VALIDATION_ERROR`: names up to 100 characters, color labels 30, transaction notes 250, amounts up to 13 integer digits and 2 decimal places, goal-allocation lists up to 50 entries, goal reorder up to 200 items. Page size is capped at 200. The one unauthenticated body read before authentication, `/auth/signin`, is capped at 4 KB and answers `413` beyond that (BR-27).
+Requests beyond these are refused with `400 VALIDATION_ERROR`: names up to 100 characters, color labels 30, transaction notes 250, amounts up to 13 integer digits and 2 decimal places (sums computed from stored amounts are rounded to 2 decimals, half-even, before they are returned), goal-allocation lists up to 50 entries, goal reorder up to 200 items. Page size is capped at 200. The one unauthenticated body read before authentication, `/auth/signin`, is capped at 4 KB and answers `413` beyond that (BR-27).
 
 ### Auth
 
@@ -2093,7 +2093,7 @@ A `RefreshToken` is opaque (32 random bytes, URL-safe base64) and never a JWT �
 
 **No CSRF token scheme is needed, but credentialed CORS is.** The web app (`https://app.mnyace.com`) and the API (`API_DOMAIN`) are different origins, so the browser only sends the cookie on cross-origin calls when the client uses `credentials: 'include'` and the API answers with `Access-Control-Allow-Credentials: true` against an explicit origin — `CorsConfig` sets `allowCredentials(true)` with an allow-list that never contains `*`. `SameSite=Strict` is what stands in for a CSRF token: the two hosts must share a registrable domain (they are same-*site* though cross-*origin*), so the cookie rides along for the app's own calls and is withheld from any request initiated by another site, including a form POST or `<img>`/`fetch` from a malicious page. If the API were ever moved to a different registrable domain the browser would treat the cookie as third-party and withhold it, breaking web refresh. The custom `X-Client-Platform` header additionally forces a CORS preflight, which an origin outside the allow-list cannot pass. The residual exposure is any other subdomain of the shared domain: it is same-site too, so no untrusted content should ever be hosted on a sibling subdomain. `CorsConfig` also lists `X-Client-Platform` in `allowedHeaders`. The header match is exact and case-sensitive: `WEB` is treated as native and receives the token in the body.
 
-### BR-27: Rate Limiting on `/auth/signin` and `/auth/refresh`
+### BR-27: Rate Limiting on `/auth/*` and `/api/**`
 
 Both endpoints are `permitAll` by necessity — there's no JWT yet to gate them — which makes them the two places an attacker can throw unlimited requests at the app without ever authenticating. `/auth/signin` is the one place a password can be guessed at all; `/auth/refresh` does real work (a DB lookup, a full rotation) on every call regardless of whether the presented token turns out to be valid, making it a cheap target for request-volume abuse even without a valid token.
 
@@ -2104,6 +2104,8 @@ Both endpoints are `permitAll` by necessity — there's no JWT yet to gate them 
 **Buckets are held in memory (Caffeine), not Redis**, which is the correct tradeoff specifically because MnyAce runs as a single Lightsail instance — a distributed store would be pure overhead with nothing to coordinate across. Caffeine's `expireAfterAccess` evicts idle keys automatically, which matters because a plain `Map` would let an attacker grow the bucket structure forever just by varying the IP or email on every request; a bounded, self-cleaning cache closes that off. The one real cost of in-memory state: every counter resets on a container restart/redeploy — a non-issue for this threat model, since a redeploy clearing an attacker's counter isn't a meaningful win for them.
 
 **`/auth/invites/{token}/{signup|verify-otp|resend-otp}` share one per-IP bucket** (`rate-limit.invite.ip.*`, default 10 per 60s). `verify-otp` is a guessable six-digit code; the per-invite guess cap in BR-18 is the real defense, and this bucket keeps a single source from hammering many invites or flooding the mailer. The read-only `GET /auth/invites/{token}` stays unthrottled.
+
+**Every `/api/**` request shares one per-IP bucket** (`rate-limit.api.ip.*`, default 300 per 60s) as a flood guard. The filter runs before the JWT check, so unauthenticated floods count too, and `OPTIONS` preflights do not. Over the limit the response is `429 TOO_MANY_REQUESTS` with `Retry-After`, and a `rate_limited` event with reason `api_ip` is logged. The limit is per IP, so many users behind one carrier or office address share it.
 
 **Password changes have their own per-user bucket** (`rate-limit.password-change.user.*`, default 5 per 900s), consumed by the service after the request shape is validated and before the current password is checked. It is keyed on the user, not the IP, because the caller is already authenticated.
 
