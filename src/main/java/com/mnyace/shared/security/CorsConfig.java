@@ -36,6 +36,9 @@ public class CorsConfig {
                 "X-Client-Platform"
         ));
 
+        // Without this a browser hides both from the web client's JavaScript.
+        config.setExposedHeaders(List.of("Retry-After", "X-Request-Id"));
+
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 
