@@ -788,7 +788,8 @@ com.mnyace
 │   ├── AuthController.java           signin, refresh, logout — see invite/ for onboarding
 │   ├── PasswordController.java       PUT /api/users/me/password
 │   ├── PasswordService.java          change password: verify, rate-limit, revoke every session, issue a fresh one
-│   ├── SessionController.java        DELETE /api/sessions — sign out of every device
+│   ├── SessionController.java        GET /api/sessions (list), DELETE /api/sessions (sign out of every device)
+│   ├── SessionService.java           the caller's live sessions, one entry per sign-in
 │   ├── AuthService.java
 │   ├── AdminBootstrapRunner.java     Seeds the first ADMIN from env vars at startup
 │   ├── RefreshTokenService.java      Thin orchestrator — hash, dispatch to Revoker/Issuer, nothing @Transactional
@@ -1047,6 +1048,16 @@ Rotates the presented `refreshToken`: the old one is revoked, a new one is issue
 Revokes every active `RefreshToken` sharing the presented token's `familyId` — i.e. logs out that one device, not every device the user is signed into elsewhere. The JWT of that device stops working at once as well, because its session no longer has a live refresh token; the user's other devices are unaffected.
 
 **Response 200:** `{ "message": "Logged out successfully" }` — web also carries `Set-Cookie: refreshToken=; Path=/auth; Max-Age=0; HttpOnly; Secure; SameSite=Strict`
+
+---
+
+#### GET /sessions — requires JWT
+Lists the caller's live sessions, most recently active first. A session is one sign-in on one device and stays a single entry across refreshes. Only the caller's own sessions are ever returned.
+
+Each entry: `id` (the session id, the same value as the access token's `sid` claim), `deviceLabel` (what the client sent at sign-in; may be empty), `signedInAt`, `lastActiveAt` (the last refresh) and `current` (true for the session making the request).
+
+**Response 200:** `{ "data": [ { "id": "…", "deviceLabel": "iPhone 15", "signedInAt": "…", "lastActiveAt": "…", "current": true } ] }`
+**401:** missing or invalid access token
 
 ---
 

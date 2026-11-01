@@ -12,4 +12,9 @@ public abstract class BaseController {
         }
         return authentication.getPrincipal().toString();
     }
+
+    protected String getCurrentSessionId() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null && authentication.getDetails() instanceof String sessionId ? sessionId : null;
+    }
 }
