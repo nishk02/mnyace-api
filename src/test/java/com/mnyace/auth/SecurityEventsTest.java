@@ -111,6 +111,28 @@ class SecurityEventsTest extends AuthIntegrationTestBase {
     }
 
     @Test
+    void signOutOneSession_isLoggedWithTheSessionButNoToken() {
+        String label = "event-" + UUID.randomUUID();
+        HttpResponse<String> phone = signInAdmin("X-Forwarded-For", freshIp());
+        HttpResponse<String> laptop = post("/auth/signin", "{\"email\":\"" + ADMIN_EMAIL + "\",\"password\":\""
+                + ADMIN_PASSWORD + "\",\"deviceLabel\":\"" + label + "\"}", "X-Forwarded-For", freshIp());
+        String phoneAuth = "Bearer " + accessTokenOf(phone);
+        String laptopId = null;
+        for (JsonNode session : json(get("/api/sessions", "Authorization", phoneAuth)).path("data")) {
+            if (label.equals(session.path("deviceLabel").asText())) {
+                laptopId = session.path("id").asText();
+            }
+        }
+
+        delete("/api/sessions/" + laptopId, "Authorization", phoneAuth);
+
+        JsonNode event = last("signout_session", "success");
+        assertThat(event.at("/user/id").asText()).isEqualTo(json(phone).path("data").path("user").path("id").asText());
+        assertThat(event.at("/labels/session_family").asText()).isEqualTo(laptopId);
+        assertNothingSecretIsLogged(accessTokenOf(laptop), refreshTokenOf(laptop), refreshTokenOf(phone));
+    }
+
+    @Test
     void refreshTokenReuse_isLoggedWithTheUserId() throws Exception {
         String ip = freshIp();
         HttpResponse<String> signedIn = signInAdmin("X-Forwarded-For", ip);

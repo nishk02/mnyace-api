@@ -7,6 +7,7 @@ public enum SecurityEvent {
     SIGNIN_SUCCESS(Category.AUTHENTICATION, "signin", Outcome.SUCCESS),
     SIGNIN_FAILURE(Category.AUTHENTICATION, "signin", Outcome.FAILURE),
     SIGNOUT_ALL(Category.AUTHENTICATION, "signout_all", Outcome.SUCCESS),
+    SIGNOUT_SESSION(Category.AUTHENTICATION, "signout_session", Outcome.SUCCESS),
     RATE_LIMITED(Category.INTRUSION_DETECTION, "rate_limited", Outcome.FAILURE),
     REFRESH_TOKEN_REUSE(Category.INTRUSION_DETECTION, "refresh_token_reuse", Outcome.FAILURE),
     PASSWORD_CHANGED(Category.IAM, "password_change", Outcome.SUCCESS),

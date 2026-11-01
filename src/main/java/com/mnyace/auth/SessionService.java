@@ -1,5 +1,6 @@
 package com.mnyace.auth;
 
+import com.mnyace.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,5 +27,20 @@ public class SessionService {
                         token.getFamilyId().equals(currentSessionId)))
                 .sorted(Comparator.comparing(SessionResponse::lastActiveAt).reversed())
                 .toList();
+    }
+
+    /** Signs out one of the user's other sessions. */
+    @Transactional
+    public void signOut(String userId, String sessionId, String currentSessionId) {
+        if (sessionId.equals(currentSessionId)) {
+            throw ApiException.badRequest("CURRENT_SESSION", "Use logout to sign out this device.", null);
+        }
+        List<RefreshToken> live = refreshTokenRepository.findAllByFamilyIdAndUser_IdAndRevokedAtIsNull(sessionId, userId);
+        if (live.isEmpty()) {
+            throw ApiException.notFound("Session not found");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        live.forEach(token -> token.setRevokedAt(now));
+        refreshTokenRepository.saveAll(live);
     }
 }

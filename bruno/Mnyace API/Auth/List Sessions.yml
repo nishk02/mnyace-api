@@ -8,6 +8,14 @@ http:
   url: "{{BASE_URL}}/api/sessions"
   auth: inherit
 
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        // Keep the first other device's id, ready for "Sign Out One Session".
+        const other = (res.body.data || []).find((s) => !s.current);
+        bru.setEnvVar("SESSION_ID", other ? other.id : "");
+
 settings:
   encodeUrl: true
   timeout: 0
