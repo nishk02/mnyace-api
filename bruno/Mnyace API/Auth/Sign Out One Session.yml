@@ -6,7 +6,9 @@ info:
 http:
   method: DELETE
   url: "{{BASE_URL}}/api/sessions/{{SESSION_ID}}"
-  auth: inherit
+  auth:
+    type: bearer
+    token: "{{AUTH_TOKEN}}"
 
 settings:
   encodeUrl: true
