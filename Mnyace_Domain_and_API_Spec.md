@@ -1044,7 +1044,7 @@ Rotates the presented `refreshToken`: the old one is revoked, a new one is issue
 ```
 **Web (`X-Client-Platform: web`):** no body needed — `refreshToken` comes from the cookie. The response additionally clears it (`Max-Age=0`) so a stale cookie can't be replayed after logout.
 
-Revokes every active `RefreshToken` sharing the presented token's `familyId` — i.e. logs out that one device, not every device the user is signed into elsewhere. The JWT itself isn't and can't be revoked (it's self-describing and stateless); it simply expires naturally within its own 15-minute lifetime, by which point no refresh is possible to extend the session further.
+Revokes every active `RefreshToken` sharing the presented token's `familyId` — i.e. logs out that one device, not every device the user is signed into elsewhere. The JWT of that device stops working at once as well, because its session no longer has a live refresh token; the user's other devices are unaffected.
 
 **Response 200:** `{ "message": "Logged out successfully" }` — web also carries `Set-Cookie: refreshToken=; Path=/auth; Max-Age=0; HttpOnly; Secure; SameSite=Strict`
 
@@ -1053,7 +1053,7 @@ Revokes every active `RefreshToken` sharing the presented token's `familyId` —
 #### DELETE /sessions — requires JWT
 Signs the caller out of **every** device: all of their active `RefreshToken`s are revoked, across every `familyId`. Other users are never affected. It lives under `/api`, not `/auth`, because `/auth/**` is public and this must require a valid login. Web clients (`X-Client-Platform: web`) also get the refresh cookie cleared, as on logout.
 
-The access token already issued cannot be revoked (it is stateless) and keeps working until it expires, at most 15 minutes; no new one can be obtained without signing in again.
+The access token already issued stops working at once too, because the API rejects a token whose session has no live refresh token; no new one can be obtained without signing in again.
 
 **Response 200:** `{ "message": "Signed out of all devices" }`
 **401:** missing or invalid access token
@@ -1066,7 +1066,7 @@ The access token already issued cannot be revoked (it is stateless) and keeps wo
 ```
 Changes the caller's password. `deviceLabel` is optional. The new password must be 8 to 72 characters (and at most 72 UTF-8 bytes, because BCrypt ignores anything beyond that), must match its confirmation, and must differ from the current one.
 
-On success every refresh token of the user is revoked, so all other devices are signed out, and the caller receives a **fresh session** (new access token plus a new refresh token, as `/auth/signin` returns it; web clients get it as the cookie instead). Access tokens already issued to other devices keep working until they expire, at most 15 minutes.
+On success every refresh token of the user is revoked, so all other devices are signed out, and the caller receives a **fresh session** (new access token plus a new refresh token, as `/auth/signin` returns it; web clients get it as the cookie instead). Access tokens already issued to other devices stop working at once.
 
 **Response 200:** same shape as `/auth/signin`.
 **400:** `INVALID_CURRENT_PASSWORD` — deliberately a `400`, not a `401`: clients treat a `401` as an expired session and would sign the user out over a typo. Also `400` for a weak or over-long new password, a mismatched confirmation, or a new password equal to the current one.
@@ -2085,7 +2085,7 @@ A `RefreshToken` is opaque (32 random bytes, URL-safe base64) and never a JWT �
 
 **`/auth/logout` revokes by `familyId`, the same mechanism reuse-detection uses** — `RefreshTokenService.revokeFamilyOf`, not a bulk SQL `UPDATE`. An `@Modifying` JPQL bulk update proved unreliable against this app's SQLite + HikariCP + Hibernate combination in practice — it would report rows affected without the write durably persisting — so every revoke path in this module (rotation's cascade, logout, and the admin-facing `revokeAllForUser`) fetches the affected rows as managed entities and saves them individually instead, the same write path every other entity in this app already relies on.
 
-**Lifetimes:** the JWT (`token`) is short-lived (`jwt.expiration-ms`, currently 15 minutes) and carries no revocation mechanism of its own — it's meant to expire naturally and get replaced via rotation, not be individually revocable. The `RefreshToken` is long-lived (`refresh-token.expiration-days`, currently 30 days, counted from when each token is issued — every rotation issues a fresh one, so a session ends after 30 days without a refresh) and *is* individually revocable, which is the entire point of separating the two: a stolen JWT self-heals within minutes regardless of any other defense; a stolen `RefreshToken` is the one that actually needs active revocation. In prod, `ProdSecretsGuard` refuses to start if `jwt.secret` is the public dev default or shorter than 32 bytes, so a missing `JWT_SECRET` can never silently leave tokens signed with a key that is published in the repo.
+**Lifetimes:** the JWT (`token`) is short-lived (`jwt.expiration-ms`, currently 15 minutes) and names its session in a signed `sid` claim (the refresh-token family). On every request the API checks that the session still has a live refresh token, so logout, sign out everywhere, a password change and reuse detection end an access token at once, not after 15 minutes; a token without a `sid` is rejected. The `RefreshToken` is long-lived (`refresh-token.expiration-days`, currently 30 days, counted from when each token is issued — every rotation issues a fresh one, so a session ends after 30 days without a refresh) and *is* individually revocable, which is the entire point of separating the two: a stolen JWT expires within minutes and dies at once when its session is revoked; a stolen `RefreshToken` is the one that actually needs active revocation. In prod, `ProdSecretsGuard` refuses to start if `jwt.secret` is the public dev default or shorter than 32 bytes, so a missing `JWT_SECRET` can never silently leave tokens signed with a key that is published in the repo.
 
 **On the web/PWA target, the `RefreshToken` never touches JavaScript-reachable storage.** A native client has no equivalent to a browser's JS-reachable storage, so the raw token in the response body was always fine there — but a PWA with no secure native keychain would otherwise have to hold a 30-day bearer credential somewhere `localStorage`/`sessionStorage`-adjacent, which is also exactly where a successful XSS payload can read it. MnyAce treats that as an unacceptable trade for a token whose entire blast radius, by design, is "full account access for 30 days." The fix is to never let the raw value reach app JS at all on web: the server sets it directly as an `HttpOnly; Secure; SameSite=Strict; Path=/auth` cookie, and the browser attaches it automatically on same-origin requests to `/auth/refresh` and `/auth/logout` without the client ever reading or storing it.
 

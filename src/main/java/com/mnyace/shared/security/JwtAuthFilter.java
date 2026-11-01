@@ -1,5 +1,6 @@
 package com.mnyace.shared.security;
 
+import com.mnyace.auth.RefreshTokenRepository;
 import com.mnyace.auth.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Component
@@ -21,6 +23,7 @@ import java.util.List;
 public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
 
     @Override
     protected void doFilterInternal(
@@ -40,8 +43,9 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         if (jwtUtil.isTokenValid(token)) {
             String userId = jwtUtil.extractUserId(token);
             String role = jwtUtil.extractRole(token);
+            String sessionId = jwtUtil.extractSessionId(token);
 
-            if (userRepository.existsById(userId)) {
+            if (userRepository.existsById(userId) && isSessionLive(sessionId)) {
                 List<SimpleGrantedAuthority> authorities =
                         List.of(new SimpleGrantedAuthority("ROLE_" + role));
 
@@ -53,5 +57,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private boolean isSessionLive(String sessionId) {
+        return sessionId != null
+                && refreshTokenRepository.existsByFamilyIdAndRevokedAtIsNullAndExpiresAtAfter(sessionId, LocalDateTime.now());
     }
 }
