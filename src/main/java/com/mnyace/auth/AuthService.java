@@ -42,9 +42,9 @@ public class AuthService {
         User user = userOpt.get();
         securityEvents.record(SecurityEvent.SIGNIN_SUCCESS, user.getId(), null);
 
-        String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole());
         RefreshTokenIssuer.IssuedRefreshToken refreshToken =
                 refreshTokenService.issueNewFamily(user, request.deviceLabel());
+        String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole(), refreshToken.familyId());
 
         return new AuthResponse(accessToken, refreshToken.rawToken(), AuthResponse.UserSummary.from(user));
     }
@@ -56,7 +56,7 @@ public class AuthService {
         RefreshTokenIssuer.IssuedRefreshToken rotated = refreshTokenService.rotate(presentedRawToken);
         User user = rotated.user();
 
-        String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole());
+        String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole(), rotated.familyId());
 
         return new AuthResponse(accessToken, rotated.rawToken(), AuthResponse.UserSummary.from(user));
     }

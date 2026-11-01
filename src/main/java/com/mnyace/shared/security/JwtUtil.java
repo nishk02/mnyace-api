@@ -23,7 +23,8 @@ public class JwtUtil {
         this.expirationMs = expirationMs;
     }
 
-    public String generateToken(String userId, String email, String role) {
+    /** The session id (`sid`) is the refresh-token family, so a request can tell which session it belongs to. */
+    public String generateToken(String userId, String email, String role, String sessionId) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + expirationMs);
 
@@ -31,6 +32,7 @@ public class JwtUtil {
                 .subject(userId)
                 .claim("email", email)
                 .claim("role", role)
+                .claim("sid", sessionId)
                 .issuedAt(now)
                 .expiration(expiry)
                 .signWith(secretKey)
@@ -39,6 +41,10 @@ public class JwtUtil {
 
     public String extractUserId(String token) {
         return parseClaims(token).getSubject();
+    }
+
+    public String extractSessionId(String token) {
+        return parseClaims(token).get("sid", String.class);
     }
 
     public String extractRole(String token) {
