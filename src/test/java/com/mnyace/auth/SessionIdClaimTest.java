@@ -46,13 +46,14 @@ class SessionIdClaimTest extends AuthIntegrationTestBase {
 
         HttpResponse<String> changed = put("/api/users/me/password", passwordBody(ADMIN_PASSWORD, temporary),
                 "Authorization", "Bearer " + accessTokenOf(signedIn), "X-Forwarded-For", ip);
-        assertThat(changed.statusCode()).isEqualTo(200);
-        assertThat(sessionIdOf(changed)).isNotEqualTo(sessionIdOf(signedIn));
-
-        // put the password back so the other tests in this class can still sign in
-        HttpResponse<String> restored = put("/api/users/me/password", passwordBody(temporary, ADMIN_PASSWORD),
-                "Authorization", "Bearer " + accessTokenOf(changed), "X-Forwarded-For", ip);
-        assertThat(restored.statusCode()).isEqualTo(200);
+        try {
+            assertThat(changed.statusCode()).isEqualTo(200);
+            assertThat(sessionIdOf(changed)).isNotEqualTo(sessionIdOf(signedIn));
+        } finally {
+            // always put the password back, so a failure here cannot break the other tests
+            put("/api/users/me/password", passwordBody(temporary, ADMIN_PASSWORD),
+                    "Authorization", "Bearer " + accessTokenOf(changed), "X-Forwarded-For", ip);
+        }
     }
 
     private static String passwordBody(String current, String next) {
