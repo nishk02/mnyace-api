@@ -1,71 +1,31 @@
-name: CI/CD
+name: CD
 
-# A pull request runs build+test. A push to main also builds, scans and deploys
-# the image - a feature branch has no business reaching production. Branches are
-# tested through their pull request, so a push does not run it a second time.
+# Runs only on a push to main (a merged pull request): test, build and scan the image,
+# push it, then deploy. Pull requests run the CI workflow instead.
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
 
-# Cancel an in-flight run for the same branch if a new commit lands - no
-# point finishing a build for code that's already been superseded.
 # Least privilege; the image job adds packages: write itself.
 permissions:
   contents: read
 
+# A newer push waits for a deploy in flight, so a deploy is never cut off halfway.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  # --- Stage 1: compile + run tests --------------------------------------
-  # This is the same "does the code even work" gate NestJS's `npm run
-  # build && npm test` would give you - just via Maven instead of npm.
-  build-and-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-java@v6
-        with:
-          distribution: temurin
-          java-version: "21"
-          cache: maven # caches ~/.m2 keyed on pom.xml, same idea as caching node_modules on package-lock.json
-
-      - name: Guard - the api container must never be published to the host
-        # RateLimitFilter trusts X-Forwarded-For because only Caddy can reach the api
-        # container (docker-compose `expose`, never `ports`). Publishing it would let anyone
-        # forge their IP and walk around the limiter.
-        run: |
-          if awk '/^  api:/{f=1;next} /^  [a-z-]+:/{f=0} f && /^    ports:/{found=1} END{exit !found}' docker-compose.yml; then
-            echo "docker-compose.yml publishes ports on the api service" >&2
-            exit 1
-          fi
-
-      - name: Validate the log shipper config
-        # Image version is read from the compose file, so CI always checks what runs in prod.
-        run: |
-          IMG=$(awk '/image: fluent\/fluent-bit:/{print $2}' docker-compose.yml)
-          docker run --rm --entrypoint /fluent-bit/bin/fluent-bit \
-            -e AXIOM_HOST=example.invalid -e AXIOM_DATASET=check -e AXIOM_TOKEN=check \
-            -v "$PWD/fluent-bit:/fluent-bit/etc:ro" \
-            "$IMG" -c /fluent-bit/etc/fluent-bit.yaml --dry-run
-
-      - name: Build and test
-        run: ./mvnw -B clean verify
-        # No src/test yet, so this is effectively a compile check today.
-        # The moment real tests exist, this same command starts running
-        # them - nothing here needs to change.
+  # --- Stage 1: the same build and tests a pull request runs ---------------
+  test:
+    uses: ./.github/workflows/ci.yml
 
   # --- Stage 2: build the image, scan it, push it if clean ---------------
   build-scan-push:
-    needs: build-and-test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -113,7 +73,6 @@ jobs:
   # --- Stage 3: deploy the new image to the Lightsail VM ------------------
   deploy:
     needs: build-scan-push
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
