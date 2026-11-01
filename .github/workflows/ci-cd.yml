@@ -1,11 +1,11 @@
 name: CI/CD
 
-# Every push runs build+test+scan (fast feedback on any branch). The image
-# build and deploy jobs only run on main - a feature branch has no business
-# reaching production.
+# A pull request runs build+test. A push to main also builds, scans and deploys
+# the image - a feature branch has no business reaching production. Branches are
+# tested through their pull request, so a push does not run it a second time.
 on:
   push:
-    branches: [ "**" ]
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 
