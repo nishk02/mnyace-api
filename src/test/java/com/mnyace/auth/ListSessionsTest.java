@@ -7,7 +7,7 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.net.http.HttpResponse;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -41,7 +41,7 @@ class ListSessionsTest extends AuthIntegrationTestBase {
     void refresh_keepsOneEntryAndMovesLastActiveForward() {
         String label = label("tablet");
         HttpResponse<String> signedIn = signInAdminAs(label);
-        LocalDateTime before = lastActive(withLabel(sessions(accessTokenOf(signedIn)), label));
+        Instant before = lastActive(withLabel(sessions(accessTokenOf(signedIn)), label));
 
         HttpResponse<String> refreshed = refresh(refreshTokenOf(signedIn), "X-Forwarded-For", freshIp());
         List<JsonNode> after = sessions(accessTokenOf(refreshed));
@@ -137,8 +137,8 @@ class ListSessionsTest extends AuthIntegrationTestBase {
         return sessions.stream().map(s -> s.path("deviceLabel").asText()).toList();
     }
 
-    private static LocalDateTime lastActive(JsonNode session) {
-        return LocalDateTime.parse(session.path("lastActiveAt").asText());
+    private static Instant lastActive(JsonNode session) {
+        return Instant.parse(session.path("lastActiveAt").asText());
     }
 
     private static String label(String prefix) {

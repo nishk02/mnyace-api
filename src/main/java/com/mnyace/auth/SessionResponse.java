@@ -1,12 +1,12 @@
 package com.mnyace.auth;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 public record SessionResponse(
         String id,
         String deviceLabel,
-        LocalDateTime signedInAt,
-        LocalDateTime lastActiveAt,
+        Instant signedInAt,
+        Instant lastActiveAt,
         boolean current
 ) {
 }

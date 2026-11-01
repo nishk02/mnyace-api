@@ -5,7 +5,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.List;
 
@@ -22,8 +24,8 @@ public class SessionService {
                 .map(token -> new SessionResponse(
                         token.getFamilyId(),
                         token.getDeviceLabel(),
-                        token.getSessionStartedAt(),
-                        token.getCreatedAt(),
+                        toInstant(token.getSessionStartedAt()),
+                        toInstant(token.getCreatedAt()),
                         token.getFamilyId().equals(currentSessionId)))
                 .sorted(Comparator.comparing(SessionResponse::lastActiveAt).reversed())
                 .toList();
@@ -42,5 +44,10 @@ public class SessionService {
         LocalDateTime now = LocalDateTime.now();
         live.forEach(token -> token.setRevokedAt(now));
         refreshTokenRepository.saveAll(live);
+    }
+
+    /** Timestamps are stored in server-local time; clients get an unambiguous UTC instant. */
+    private static Instant toInstant(LocalDateTime local) {
+        return local.atZone(ZoneId.systemDefault()).toInstant();
     }
 }
