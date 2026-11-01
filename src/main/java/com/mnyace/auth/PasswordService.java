@@ -73,7 +73,7 @@ public class PasswordService {
         refreshTokenService.revokeAllForUser(userId);
         RefreshTokenIssuer.IssuedRefreshToken session =
                 refreshTokenService.issueNewFamily(user, request.deviceLabel());
-        String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole());
+        String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole(), session.familyId());
 
         securityEvents.record(SecurityEvent.PASSWORD_CHANGED, userId, null);
         return new AuthResponse(accessToken, session.rawToken(), AuthResponse.UserSummary.from(user));

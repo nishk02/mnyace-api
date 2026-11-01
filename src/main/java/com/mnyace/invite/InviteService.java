@@ -145,8 +145,8 @@ public class InviteService {
         invite.setOtpCodeHash(null);
         inviteRepository.save(invite);
 
-        String accessToken = jwtUtil.generateToken(savedUser.getId(), savedUser.getEmail(), savedUser.getRole());
         RefreshTokenIssuer.IssuedRefreshToken refreshToken = refreshTokenService.issueNewFamily(savedUser, null);
+        String accessToken = jwtUtil.generateToken(savedUser.getId(), savedUser.getEmail(), savedUser.getRole(), refreshToken.familyId());
 
         return new AuthResponse(accessToken, refreshToken.rawToken(), AuthResponse.UserSummary.from(savedUser));
     }

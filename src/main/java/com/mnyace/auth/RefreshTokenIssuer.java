@@ -25,7 +25,7 @@ public class RefreshTokenIssuer {
     @Value("${refresh-token.max-session-days}")
     private long maxSessionDays;
 
-    public record IssuedRefreshToken(User user, String rawToken, LocalDateTime expiresAt) {}
+    public record IssuedRefreshToken(User user, String rawToken, LocalDateTime expiresAt, String familyId) {}
 
     @Transactional
     public IssuedRefreshToken issue(User user, String familyId, String deviceLabel, LocalDateTime sessionStartedAt) {
@@ -43,7 +43,7 @@ public class RefreshTokenIssuer {
         token.setExpiresAt(expiresAt);
         refreshTokenRepository.save(token);
 
-        return new IssuedRefreshToken(user, rawToken, expiresAt);
+        return new IssuedRefreshToken(user, rawToken, expiresAt, familyId);
     }
 
     private String generateRawToken() {
