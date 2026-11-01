@@ -8,9 +8,12 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/sessions")
@@ -19,6 +22,13 @@ public class SessionController extends BaseController {
     private final RefreshTokenService refreshTokenService;
     private final RefreshTokenCookieWriter cookieWriter;
     private final SecurityEvents securityEvents;
+    private final SessionService sessionService;
+
+    /** The caller's live sessions, with the one making this request marked as current. */
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<SessionResponse>>> list() {
+        return ResponseEntity.ok(ApiResponse.success(sessionService.listFor(getCurrentUserId(), getCurrentSessionId())));
+    }
 
     /** Signs the caller out of every device by revoking all of their refresh tokens. */
     @DeleteMapping

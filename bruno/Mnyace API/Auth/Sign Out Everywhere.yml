@@ -16,7 +16,7 @@ runtime:
   scripts:
     - type: after-response
       code: |-
-        // Every refresh token is revoked; the access token in hand still works until it expires.
+        // Every session ends, so the access token in hand stops working too.
         if (res.status === 200) bru.setEnvVar("REFRESH_TOKEN", "");
 
 settings:
