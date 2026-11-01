@@ -36,7 +36,7 @@ updates:
       - dependency-name: "eclipse-temurin"
         update-types: [ "version-update:semver-major" ]
 
-  # The Actions used by .github/workflows/ci-cd.yml itself (checkout,
+  # The Actions used by the workflows in .github/workflows (checkout,
   # scp-action, ssh-action, trivy-action, ...).
   - package-ecosystem: "github-actions"
     directory: "/"
