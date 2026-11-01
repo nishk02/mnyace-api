@@ -9,11 +9,13 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/sessions")
@@ -28,6 +30,15 @@ public class SessionController extends BaseController {
     @GetMapping
     public ResponseEntity<ApiResponse<List<SessionResponse>>> list() {
         return ResponseEntity.ok(ApiResponse.success(sessionService.listFor(getCurrentUserId(), getCurrentSessionId())));
+    }
+
+    /** Signs the caller out of one of their other devices. */
+    @DeleteMapping("/{sessionId}")
+    public ResponseEntity<ApiResponse<Void>> signOutSession(@PathVariable String sessionId) {
+        String userId = getCurrentUserId();
+        sessionService.signOut(userId, sessionId, getCurrentSessionId());
+        securityEvents.record(SecurityEvent.SIGNOUT_SESSION, userId, null, Map.of("session_family", sessionId));
+        return ResponseEntity.ok(ApiResponse.success(null, "Signed out of that device"));
     }
 
     /** Signs the caller out of every device by revoking all of their refresh tokens. */

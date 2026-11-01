@@ -788,7 +788,7 @@ com.mnyace
 │   ├── AuthController.java           signin, refresh, logout — see invite/ for onboarding
 │   ├── PasswordController.java       PUT /api/users/me/password
 │   ├── PasswordService.java          change password: verify, rate-limit, revoke every session, issue a fresh one
-│   ├── SessionController.java        GET /api/sessions (list), DELETE /api/sessions (sign out of every device)
+│   ├── SessionController.java        GET /api/sessions (list), DELETE /api/sessions/{id} (one device), DELETE /api/sessions (every device)
 │   ├── SessionService.java           the caller's live sessions, one entry per sign-in
 │   ├── AuthService.java
 │   ├── AdminBootstrapRunner.java     Seeds the first ADMIN from env vars at startup
@@ -1057,6 +1057,16 @@ Lists the caller's live sessions, most recently active first. A session is one s
 Each entry: `id` (the session id, the same value as the access token's `sid` claim), `deviceLabel` (what the client sent at sign-in; may be empty), `signedInAt`, `lastActiveAt` (the last refresh) and `current` (true for the session making the request).
 
 **Response 200:** `{ "data": [ { "id": "…", "deviceLabel": "iPhone 15", "signedInAt": "…", "lastActiveAt": "…", "current": true } ] }`
+**401:** missing or invalid access token
+
+---
+
+#### DELETE /sessions/{id} — requires JWT
+Signs the caller out of one of their **other** devices: every live `RefreshToken` of that session is revoked, so the device's access token stops working at once and its refresh token no longer works. `{id}` is the `id` from `GET /sessions`.
+
+**Response 200:** `{ "message": "Signed out of that device" }`
+**400:** `CURRENT_SESSION` when `{id}` is the session making the request ("Use logout to sign out this device"); signing out the current device is `POST /auth/logout`, and signing out everywhere is `DELETE /sessions`.
+**404:** `NOT_FOUND` when no live session of the caller has that id. A session that belongs to another user, one that never existed and one already signed out all get the same answer, so ids cannot be probed.
 **401:** missing or invalid access token
 
 ---
@@ -2128,7 +2138,7 @@ Both endpoints are `permitAll` by necessity — there's no JWT yet to gate them 
 
 Security-relevant actions leave an audit trail separate from ordinary application logs, so "was this account attacked yesterday?" can be answered from a log, not from memory.
 
-**One JSON line per event, using Elastic Common Schema field names**, so dashboards and alert rules in common log tools read it without translation: `@timestamp` (UTC), `event.category` / `event.action` / `event.outcome` (`success` or `failure`) / `event.reason`, `user.id`, `source.ip`, `user_agent.original` (capped at 200 characters), `http.request.id`, `service.name`, `service.environment`, and a small `labels` object for related ids. The events live in one catalogue (`SecurityEvent`): sign-in success and failure (`reason` `unknown_user` or `wrong_password`), `signout_all`, `rate_limited` (`reason` is the bucket that tripped: `signin_ip`, `signin_email`, `refresh_ip`, `invite_ip`, `password_change_user`), `refresh_token_reuse` (with the session family), `password_change` success and failure, `otp_lockout`, and `invite_create`.
+**One JSON line per event, using Elastic Common Schema field names**, so dashboards and alert rules in common log tools read it without translation: `@timestamp` (UTC), `event.category` / `event.action` / `event.outcome` (`success` or `failure`) / `event.reason`, `user.id`, `source.ip`, `user_agent.original` (capped at 200 characters), `http.request.id`, `service.name`, `service.environment`, and a small `labels` object for related ids. The events live in one catalogue (`SecurityEvent`): sign-in success and failure (`reason` `unknown_user` or `wrong_password`), `signout_all`, `signout_session` (with the session family), `rate_limited` (`reason` is the bucket that tripped: `signin_ip`, `signin_email`, `refresh_ip`, `invite_ip`, `api_ip`, `password_change_user`), `refresh_token_reuse` (with the session family), `password_change` success and failure, `otp_lockout`, and `invite_create`.
 
 **What is never logged:** passwords, access or refresh tokens, OTP codes, invite tokens, and email addresses. People are identified by `user.id` only, a random UUID that is not derived from anything personal and is not a credential: knowing it grants no access, because every request is authorized from the access token and per-record ownership is enforced. The id and the IP address are still personal data (pseudonymous), so the log is treated as such: short retention and restricted access.
 
