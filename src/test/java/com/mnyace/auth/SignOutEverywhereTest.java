@@ -61,12 +61,12 @@ class SignOutEverywhereTest extends AuthIntegrationTestBase {
     }
 
     @Test
-    void anAlreadyIssuedAccessToken_keepsWorkingUntilItExpires() {
+    void anAlreadyIssuedAccessToken_stopsWorkingAtOnce() {
         String access = accessTokenOf(signInAdmin("X-Forwarded-For", freshIp()));
 
         signOutEverywhere("Bearer " + access);
 
-        assertThat(get("/api/accounts", "Authorization", "Bearer " + access).statusCode()).isEqualTo(200);
+        assertThat(get("/api/accounts", "Authorization", "Bearer " + access).statusCode()).isEqualTo(401);
     }
 
     private HttpResponse<String> signOutEverywhere(String authorization) {
