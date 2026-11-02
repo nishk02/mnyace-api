@@ -16,3 +16,7 @@ variables:
     name: PWD
   - secret: true
     name: REFRESH_TOKEN
+  - secret: true
+    name: RESET_CODE
+  - secret: true
+    name: NEW_PWD

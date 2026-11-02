@@ -26,6 +26,14 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getCode(), ex.getMessage(), ex.getDetails()));
     }
 
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<ApiResponse<?>> handleTooManyRequests(TooManyRequestsException ex) {
+        return ResponseEntity
+                .status(ex.getStatus())
+                .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
+                .body(ApiResponse.error(ex.getCode(), ex.getMessage()));
+    }
+
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<ApiResponse<?>> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
         return ResponseEntity

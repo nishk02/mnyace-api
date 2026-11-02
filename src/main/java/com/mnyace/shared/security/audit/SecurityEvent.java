@@ -12,6 +12,9 @@ public enum SecurityEvent {
     REFRESH_TOKEN_REUSE(Category.INTRUSION_DETECTION, "refresh_token_reuse", Outcome.FAILURE),
     PASSWORD_CHANGED(Category.IAM, "password_change", Outcome.SUCCESS),
     PASSWORD_CHANGE_FAILED(Category.IAM, "password_change", Outcome.FAILURE),
+    PASSWORD_RESET_REQUESTED(Category.IAM, "password_reset_request", Outcome.SUCCESS),
+    PASSWORD_RESET(Category.IAM, "password_reset", Outcome.SUCCESS),
+    PASSWORD_RESET_FAILED(Category.IAM, "password_reset", Outcome.FAILURE),
     OTP_LOCKOUT(Category.IAM, "otp_lockout", Outcome.FAILURE),
     INVITE_CREATED(Category.IAM, "invite_create", Outcome.SUCCESS);
 

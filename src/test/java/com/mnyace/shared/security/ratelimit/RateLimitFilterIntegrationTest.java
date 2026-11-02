@@ -45,6 +45,12 @@ class RateLimitFilterIntegrationTest {
     @Value("${rate-limit.invite.ip.capacity}")
     private int inviteIpCapacity;
 
+    @Value("${rate-limit.forgot-password.ip.capacity}")
+    private int forgotPasswordIpCapacity;
+
+    @Value("${rate-limit.reset-password.ip.capacity}")
+    private int resetPasswordIpCapacity;
+
     @Value("${rate-limit.api.ip.capacity}")
     private int apiIpCapacity;
 
@@ -78,6 +84,26 @@ class RateLimitFilterIntegrationTest {
     @Test
     void inviteVerifyOtp_percentEncodedPath_isRateLimitedPerIp() throws Exception {
         assertLimitedAfter(inviteIpCapacity, "/auth/invites/abc/%76erify-otp", "10.1.0.8", i -> "{\"code\":\"000000\"}");
+    }
+
+    @Test
+    void forgotPassword_plainPath_isRateLimitedPerIp() throws Exception {
+        assertLimitedAfter(forgotPasswordIpCapacity, "/auth/forgot-password", "10.1.0.9", i -> "{\"email\":\"nobody@x.com\"}");
+    }
+
+    @Test
+    void forgotPassword_percentEncodedPath_isRateLimitedPerIp() throws Exception {
+        assertLimitedAfter(forgotPasswordIpCapacity, "/auth/%66orgot-password", "10.1.0.10", i -> "{\"email\":\"nobody@x.com\"}");
+    }
+
+    @Test
+    void resetPassword_plainPath_isRateLimitedPerIp() throws Exception {
+        assertLimitedAfter(resetPasswordIpCapacity, "/auth/reset-password", "10.1.0.11", i -> resetBody(i));
+    }
+
+    @Test
+    void resetPassword_percentEncodedPath_isRateLimitedPerIp() throws Exception {
+        assertLimitedAfter(resetPasswordIpCapacity, "/auth/%72eset-password", "10.1.0.12", i -> resetBody(i));
     }
 
     @Test
@@ -169,5 +195,10 @@ class RateLimitFilterIntegrationTest {
                 .GET()
                 .build();
         return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    // a different email per call, so only the IP bucket can trip
+    private static String resetBody(int i) {
+        return "{\"email\":\"ghost" + i + "@x.com\",\"code\":\"123456\",\"newPassword\":\"NewPassword456!\",\"confirmNewPassword\":\"NewPassword456!\"}";
     }
 }

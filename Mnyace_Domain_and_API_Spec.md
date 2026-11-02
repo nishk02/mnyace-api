@@ -504,6 +504,24 @@ See BR-26 for the full rotation and reuse-detection rule set.
 
 ---
 
+### 3.13 PasswordReset
+
+One row per emailed password-reset code. Only an HMAC of the code is stored, never the code itself. Rows are also the daily count of reset emails sent, which is how BR-29 keeps within the mail quota, so they are kept for 2 days after creation before the cleanup job deletes them.
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUID | Primary key |
+| `userId` | UUID | FK to User |
+| `codeHash` | String | HMAC-SHA256 (hex) of `userId:code`, keyed from the server secret — see BR-29 |
+| `expiresAt` | LocalDateTime | 15 minutes after creation, immutable |
+| `attempts` | int | Wrong or right guesses spent on this code; the code dies at 5 |
+| `createdAt` | LocalDateTime | Also counts toward the daily email budget |
+| `usedAt` | LocalDateTime | `null` while open; set on success, or when a newer request replaces the code |
+
+See BR-29 for the full rule set.
+
+---
+
 ## 4. Database Schema (SQLite)
 
 ### SQLite type notes:
@@ -568,6 +586,22 @@ CREATE TABLE refresh_tokens (
 
 CREATE INDEX idx_refresh_tokens_user ON refresh_tokens(user_id);
 CREATE INDEX idx_refresh_tokens_family ON refresh_tokens(family_id);
+
+-- ============================================================
+-- PASSWORD RESETS (emailed one-time codes — see spec §3.13, BR-29)
+-- ============================================================
+CREATE TABLE password_resets (
+    id         TEXT      NOT NULL PRIMARY KEY,
+    user_id    TEXT      NOT NULL REFERENCES users(id),
+    code_hash  TEXT      NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    attempts   INTEGER   NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL,
+    used_at    TIMESTAMP
+);
+
+CREATE INDEX idx_password_resets_user ON password_resets(user_id);
+CREATE INDEX idx_password_resets_created ON password_resets(created_at);
 
 -- ============================================================
 -- USER PROFILES (preferences only)
@@ -800,9 +834,18 @@ com.mnyace
 │   ├── RefreshRequest.java
 │   ├── LogoutRequest.java
 │   ├── AuthResponse.java             +refreshToken
+│   ├── PasswordResetController.java  POST /auth/forgot-password, /auth/reset-password — public
+│   ├── PasswordResetService.java     Code issue/verify, daily mail caps, sign-out-everywhere on success — see BR-29
+│   ├── PasswordResetMailer.java      @Async send, so response time does not reveal whether an email has an account
+│   ├── PasswordResetCodeHasher.java  HMAC of the code under a key derived from the JWT secret
+│   ├── PasswordResetCleanupJob.java  Daily delete of reset rows older than 2 days
+│   ├── PasswordResetRepository.java
+│   ├── ForgotPasswordRequest.java
+│   ├── ResetPasswordRequest.java
 │   ├── UserRepository.java
 │   ├── User.java                     @Entity
-│   └── RefreshToken.java             @Entity — see §3.12
+│   ├── RefreshToken.java             @Entity — see §3.12
+│   └── PasswordReset.java            @Entity — see §3.13
 │
 ├── invite/                           Invite-only onboarding (replaces open signup, v1.4.0)
 │   ├── AdminInviteController.java    POST /api/admin/invites — JWT + ADMIN only
@@ -980,11 +1023,11 @@ All endpoints require `Authorization: Bearer {jwt}` except `/auth/**`.
 
 ### Input Limits
 
-Requests beyond these are refused with `400 VALIDATION_ERROR`: names up to 100 characters, color labels 30, transaction notes 250, amounts up to 13 integer digits and 2 decimal places (sums computed from stored amounts are rounded to 2 decimals, half-even, before they are returned), goal-allocation lists up to 50 entries, goal reorder up to 200 items. Page size is capped at 200. The one unauthenticated body read before authentication, `/auth/signin`, is capped at 4 KB and answers `413` beyond that (BR-27).
+Requests beyond these are refused with `400 VALIDATION_ERROR`: names up to 100 characters, color labels 30, transaction notes 250, amounts up to 13 integer digits and 2 decimal places (sums computed from stored amounts are rounded to 2 decimals, half-even, before they are returned), goal-allocation lists up to 50 entries, goal reorder up to 200 items. Page size is capped at 200. The unauthenticated bodies the rate limiter reads before authentication, `/auth/signin` and `/auth/reset-password`, are capped at 4 KB and answer `413` beyond that (BR-27).
 
 ### Auth
 
-Self-registration is invite-only — there is no public "create an account" endpoint. A new `User` only ever comes into existence via the **Invites** flow below (or, for the very first account, `AdminBootstrapRunner` at startup). `/auth/**` stays fully `permitAll` even though it now covers the invite-acceptance endpoints too, since every step of that flow happens before the person has a JWT to present.
+Self-registration is invite-only — there is no public "create an account" endpoint. A new `User` only ever comes into existence via the **Invites** flow below (or, for the very first account, `AdminBootstrapRunner` at startup). `/auth/**` stays fully `permitAll` even though it also covers the invite-acceptance and password-recovery endpoints, since every step of those flows happens before the person has a JWT to present.
 
 #### POST /auth/signin
 ```json
@@ -1048,6 +1091,28 @@ Rotates the presented `refreshToken`: the old one is revoked, a new one is issue
 Revokes every active `RefreshToken` sharing the presented token's `familyId` — i.e. logs out that one device, not every device the user is signed into elsewhere. The JWT of that device stops working at once as well, because its session no longer has a live refresh token; the user's other devices are unaffected.
 
 **Response 200:** `{ "message": "Logged out successfully" }` — web also carries `Set-Cookie: refreshToken=; Path=/auth; Max-Age=0; HttpOnly; Secure; SameSite=Strict`
+
+---
+
+#### POST /auth/forgot-password — public
+```json
+{ "email": "newmember@example.com" }
+```
+Emails a 6-digit one-time code that is good for 15 minutes. It answers the same way whether or not the email has an account, and sends mail only when it does (BR-29).
+
+**Response 200:** `{ "success": true, "message": "If an account exists for that email, a code has been sent." }`
+**400:** `VALIDATION_ERROR` for a missing or malformed email.
+**429:** `TOO_MANY_REQUESTS` with `Retry-After`, either from the per-IP limits or because the day's reset-email budget is used up, which applies to every email alike (BR-29, BR-27). A repeat request for the same email inside the 60-second cooldown, or past 3 requests that day, is still `200` and sends nothing.
+
+#### POST /auth/reset-password — public
+```json
+{ "email": "newmember@example.com", "code": "482913", "newPassword": "NewPassword456!", "confirmNewPassword": "NewPassword456!" }
+```
+Sets the new password and signs the user out of every device. It does **not** sign them in: no tokens or cookies are returned, and the client sends them to sign-in. The new password follows the change-password rules: 8 to 72 characters and at most 72 UTF-8 bytes, matching its confirmation.
+
+**Response 200:** `{ "success": true, "message": "Password reset. Please sign in with your new password." }`
+**400:** `INVALID_OR_EXPIRED_CODE` for a wrong, expired, already used or unknown-email code, all with one message so a caller cannot tell which. `VALIDATION_ERROR` for a weak or over-long password, a mismatched confirmation, a malformed email, or a code that is not 6 digits; none of these spend a guess.
+**429:** `TOO_MANY_REQUESTS` with `Retry-After` once the IP or the email has exceeded the reset limits (BR-27).
 
 ---
 
@@ -2128,6 +2193,8 @@ Both endpoints are `permitAll` by necessity — there's no JWT yet to gate them 
 
 **`/auth/invites/{token}/{signup|verify-otp|resend-otp}` share one per-IP bucket** (`rate-limit.invite.ip.*`, default 10 per 60s). `verify-otp` is a guessable six-digit code; the per-invite guess cap in BR-18 is the real defense, and this bucket keeps a single source from hammering many invites or flooding the mailer. The read-only `GET /auth/invites/{token}` stays unthrottled.
 
+**Password recovery adds four buckets**, all per IP or per email and held in memory like the rest. `/auth/forgot-password` has a per-IP bucket (`rate-limit.forgot-password.ip.*`, default 5 per 900s) and a daily per-IP bucket (`rate-limit.forgot-password.ip-daily.*`, default 10 per 86400s), reasons `forgot_password_ip` and `forgot_password_ip_daily`. `/auth/reset-password` has a per-IP bucket (`rate-limit.reset-password.ip.*`, default 10 per 900s) and a per-email bucket (`rate-limit.reset-password.email.*`, default 10 per 900s), reasons `reset_password_ip` and `reset_password_email`; its body is read (4 KB cap) for the normalized email, as for sign-in. The per-email and daily mail caps for `forgot-password` are counted from the database rather than held in memory, so a restart cannot reset them — see BR-29.
+
 **Every `/api/**` request shares one per-IP bucket** (`rate-limit.api.ip.*`, default 300 per 60s) as a flood guard. The filter runs before the JWT check, so unauthenticated floods count too, and `OPTIONS` preflights do not. Over the limit the response is `429 TOO_MANY_REQUESTS` with `Retry-After`, and a `rate_limited` event with reason `api_ip` is logged. The limit is per IP, so many users behind one carrier or office address share it.
 
 **Password changes have their own per-user bucket** (`rate-limit.password-change.user.*`, default 5 per 900s), consumed by the service after the request shape is validated and before the current password is checked. It is keyed on the user, not the IP, because the caller is already authenticated.
@@ -2140,7 +2207,7 @@ Both endpoints are `permitAll` by necessity — there's no JWT yet to gate them 
 
 Security-relevant actions leave an audit trail separate from ordinary application logs, so "was this account attacked yesterday?" can be answered from a log, not from memory.
 
-**One JSON line per event, using Elastic Common Schema field names**, so dashboards and alert rules in common log tools read it without translation: `@timestamp` (UTC), `event.category` / `event.action` / `event.outcome` (`success` or `failure`) / `event.reason`, `user.id`, `source.ip`, `user_agent.original` (capped at 200 characters), `http.request.id`, `service.name`, `service.environment`, and a small `labels` object for related ids. The events live in one catalogue (`SecurityEvent`): sign-in success and failure (`reason` `unknown_user` or `wrong_password`), `signout_all`, `signout_session` (with the session family), `rate_limited` (`reason` is the bucket that tripped: `signin_ip`, `signin_email`, `refresh_ip`, `invite_ip`, `api_ip`, `password_change_user`), `refresh_token_reuse` (with the session family), `password_change` success and failure, `otp_lockout`, and `invite_create`.
+**One JSON line per event, using Elastic Common Schema field names**, so dashboards and alert rules in common log tools read it without translation: `@timestamp` (UTC), `event.category` / `event.action` / `event.outcome` (`success` or `failure`) / `event.reason`, `user.id`, `source.ip`, `user_agent.original` (capped at 200 characters), `http.request.id`, `service.name`, `service.environment`, and a small `labels` object for related ids. The events live in one catalogue (`SecurityEvent`): sign-in success and failure (`reason` `unknown_user` or `wrong_password`), `signout_all`, `signout_session` (with the session family), `rate_limited` (`reason` is the bucket that tripped: `signin_ip`, `signin_email`, `refresh_ip`, `invite_ip`, `api_ip`, `password_change_user`), `refresh_token_reuse` (with the session family), `password_change` success and failure, `password_reset_request` (existing accounts only), `password_reset` success and failure (`reason` `unknown_user`, `no_open_code`, `expired`, `attempts_exhausted`, `wrong_code` or `already_used`; never the code), `otp_lockout` (reason `password_reset_max_attempts` for a reset code), and `invite_create`. The `rate_limited` reasons also include `forgot_password_ip`, `forgot_password_ip_daily`, `reset_password_ip`, `reset_password_email`, `forgot_password_email_daily` and `mail_budget_daily`.
 
 **What is never logged:** passwords, access or refresh tokens, OTP codes, invite tokens, and email addresses. People are identified by `user.id` only, a random UUID that is not derived from anything personal and is not a credential: knowing it grants no access, because every request is authorized from the access token and per-record ownership is enforced. The id and the IP address are still personal data (pseudonymous), so the log is treated as such: short retention and restricted access.
 
@@ -2150,6 +2217,26 @@ Security-relevant actions leave an audit trail separate from ordinary applicatio
 
 **Shipping.** A `log-shipper` container (Fluent Bit, version pinned in `docker-compose.yml`) reads `security.log` read-only and forwards each line over HTTPS to Axiom (dataset `mnyace-security`, 30 days of retention on its free plan). It remembers how far it has read, so a restart neither resends nor skips lines, and it keeps retrying while Axiom is unreachable, while the local file keeps the events in the meantime. The application never talks to Axiom, so an outage there cannot slow a request, and only the shipper holds the ingest token. The shipper container has no published ports, a read-only filesystem, no extra capabilities and a 64 MB memory cap, and CI validates its config with `--dry-run` before any deploy. It needs three secrets: `AXIOM_HOST` (the edge domain shown for the account), `AXIOM_DATASET` and `AXIOM_TOKEN` (ingest-only).
 
+### BR-29: Password Reset by Emailed Code
+
+A user who has forgotten their password gets a 6-digit one-time code by email, then sets a new password with it. There is no link: the code is typed in, never put in a URL. It follows the invite OTP (BR-18), with the differences below.
+
+**The code.** 6 digits from `SecureRandom`, valid 15 minutes, single use. Only an HMAC-SHA256 of `userId:code` is stored, keyed from the server's JWT secret rather than hashed with BCrypt: a 6-digit code can be brute-forced from any unkeyed hash, so the server-side key is what protects a leaked database, and BCrypt's slowness would also make requests for existing accounts measurably slower than for unknown ones. Rotating the JWT secret only voids codes that are 15 minutes old at most.
+
+**Guesses.** At most 5 per code, and the guess is spent before the code is compared, so parallel requests cannot get extra tries. A wrong, exhausted, expired, already used or unknown-email code all answer one `400 INVALID_OR_EXPIRED_CODE` with one message. A request that fails password validation (weak, over-long, mismatched) is rejected before any guess is spent, so a typo in the password never burns the code. A new request replaces the user's earlier open code.
+
+**No account enumeration.** `/auth/forgot-password` answers `200` with one message whether or not the email exists, and the email is sent from a small bounded background executor, so the response does not wait on the mail server. A repeat request inside the 60-second cooldown (`password-reset.request-cooldown-seconds`) or past the per-email daily cap is answered `200` with no mail, never an error that would show the account exists.
+
+**The mail quota.** The mail provider allows 300 emails a day across invites, sign-up codes and resets. Resets are held to a budget of 60 a day across all users (`password-reset.mail.daily-budget`) and 3 a day per email (`password-reset.mail.per-email-daily`), counted per IST day from the rows in `password_resets`, so the counts survive restarts. Unknown emails create no row and cost nothing. When the day's budget is used up, every request gets `429 TOO_MANY_REQUESTS` with `Retry-After` set to the seconds until midnight IST; the answer is the same for every email, so it reveals nothing about any account. Past the per-email cap the answer stays `200`, as above. A person who knows real emails could use up the budget and block recovery until midnight; they cannot touch the quota reserved for invites. Raising `daily-budget` is the knob if real usage needs it.
+
+**On success.** The new password is stored with the usual BCrypt, every refresh token of the user is revoked (all devices, and access tokens issued on those sessions stop working at once), and the code is marked used, all in one transaction. The response carries no tokens: the user is not signed in.
+
+**Cleanup.** `PasswordResetCleanupJob` runs daily at 03:45 IST and deletes rows older than `password-reset.cleanup.retention-days` (default 2). It must stay at 2 or more, since the daily budget is counted from these rows.
+
+**Out of scope.** Admin-initiated resets and non-email delivery.
+
+---
+
 ## 10. Screens-to-API Mapping
 
 | Screen (Figma page) | API calls made |
@@ -2157,6 +2244,7 @@ Security-relevant actions leave an audit trail separate from ordinary applicatio
 | Splash / Onboarding (p2–3) | None |
 | Sign Up (p4) | `GET /auth/invites/{token}` → `POST /auth/invites/{token}/signup` → `POST /auth/invites/{token}/verify-otp` (invite-only, see §6 Invites) |
 | Sign In (p5) | `POST /auth/signin` |
+| Forgot Password (from Sign In) | `POST /auth/forgot-password` → `POST /auth/reset-password`, then back to Sign In |
 | Get Started — step 1 (p6) | `GET /accounts` |
 | Get Started — step 2 (p7) | `GET /planned-amounts` |
 | Get Started — step 3 (p8) | `GET /goals` |
