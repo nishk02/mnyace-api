@@ -1119,9 +1119,9 @@ Sets the new password and signs the user out of every device. It does **not** si
 #### GET /sessions — requires JWT
 Lists the caller's live sessions, most recently active first. A session is one sign-in on one device and stays a single entry across refreshes. Only the caller's own sessions are ever returned.
 
-Each entry: `id` (the session id, the same value as the access token's `sid` claim), `deviceLabel` (what the client sent at sign-in; may be empty), `signedInAt`, `lastActiveAt` (the last refresh) and `current` (true for the session making the request).
+Each entry: `id` (the session id, the same value as the access token's `sid` claim), `deviceLabel` (what the client sent at sign-in; may be empty), `signedInAt`, `lastActiveAt` (the last refresh) and `current` (true for the session making the request). Both timestamps are UTC instants in ISO-8601 form ending in `Z`, so clients show them in their own timezone.
 
-**Response 200:** `{ "data": [ { "id": "…", "deviceLabel": "iPhone 15", "signedInAt": "…", "lastActiveAt": "…", "current": true } ] }`
+**Response 200:** `{ "data": [ { "id": "…", "deviceLabel": "iPhone 15", "signedInAt": "2026-11-01T19:11:32Z", "lastActiveAt": "2026-11-01T19:11:32Z", "current": true } ] }`
 **401:** missing or invalid access token
 
 ---
