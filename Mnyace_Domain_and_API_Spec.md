@@ -1159,8 +1159,10 @@ The invited person's first step after opening the emailed link — stages their 
 
 #### POST /auth/invites/{token}/verify-otp — public
 ```json
-{ "code": "482913" }
+{ "code": "482913", "deviceLabel": "iPhone 15" }
 ```
+`deviceLabel` is optional: the name this device shows in `GET /api/sessions`, same as on `/auth/signin`.
+
 **Response 200:** the `User` is created on success — same shape as `/auth/signin`, including the `X-Client-Platform: web` cookie split (omitted-body + `Set-Cookie` for web, body `refreshToken` for native)
 ```json
 {

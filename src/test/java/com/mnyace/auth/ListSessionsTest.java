@@ -92,7 +92,7 @@ class ListSessionsTest extends AuthIntegrationTestBase {
 
     @Test
     void anotherUsersSessions_neverAppear() {
-        registerMember();
+        registerMember(MEMBER_EMAIL, null);
         String memberLabel = label("members-phone");
         String adminLabel = label("admins-phone");
         String memberToken = accessTokenOf(signInAs(MEMBER_EMAIL, MEMBER_PASSWORD, memberLabel));
@@ -105,6 +105,17 @@ class ListSessionsTest extends AuthIntegrationTestBase {
         assertThat(withLabel(memberSessions, adminLabel)).isNull();
         assertThat(withLabel(adminSessions, adminLabel)).isNotNull();
         assertThat(withLabel(adminSessions, memberLabel)).isNull();
+    }
+
+    @Test
+    void signUpSession_isListedWithTheLabelSentAtVerifyOtp() {
+        String label = label("signup-phone");
+
+        String memberToken = accessTokenOf(registerMember("signup-" + UUID.randomUUID() + "@test.local", label));
+
+        JsonNode session = withLabel(sessions(memberToken), label);
+        assertThat(session).isNotNull();
+        assertThat(session.path("current").asBoolean()).isTrue();
     }
 
     @Test
@@ -146,16 +157,17 @@ class ListSessionsTest extends AuthIntegrationTestBase {
     }
 
     /** Creates a second user through the invite flow. */
-    private void registerMember() {
+    private HttpResponse<String> registerMember(String email, String deviceLabel) {
         String adminAuth = "Bearer " + accessTokenOf(signInAdmin("X-Forwarded-For", freshIp()));
-        String inviteToken = json(post("/api/admin/invites", "{\"email\":\"" + MEMBER_EMAIL + "\"}",
+        String inviteToken = json(post("/api/admin/invites", "{\"email\":\"" + email + "\"}",
                 "Authorization", adminAuth)).path("data").path("token").asText();
         post("/auth/invites/" + inviteToken + "/signup",
                 "{\"firstName\":\"Listing\",\"lastName\":\"User\",\"password\":\"" + MEMBER_PASSWORD
                         + "\",\"confirmPassword\":\"" + MEMBER_PASSWORD + "\"}", "X-Forwarded-For", freshIp());
         ArgumentCaptor<String> code = ArgumentCaptor.forClass(String.class);
-        verify(emailService, atLeastOnce()).sendOtpEmail(eq(MEMBER_EMAIL), code.capture());
-        post("/auth/invites/" + inviteToken + "/verify-otp",
-                "{\"code\":\"" + code.getValue() + "\"}", "X-Forwarded-For", freshIp());
+        verify(emailService, atLeastOnce()).sendOtpEmail(eq(email), code.capture());
+        String labelField = deviceLabel == null ? "" : ",\"deviceLabel\":\"" + deviceLabel + "\"";
+        return post("/auth/invites/" + inviteToken + "/verify-otp",
+                "{\"code\":\"" + code.getValue() + "\"" + labelField + "}", "X-Forwarded-For", freshIp());
     }
 }
