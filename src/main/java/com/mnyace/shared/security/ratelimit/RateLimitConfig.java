@@ -56,4 +56,36 @@ public class RateLimitConfig {
     ) {
         return new RateLimiterService(capacity, Duration.ofSeconds(periodSeconds));
     }
+
+    @Bean
+    public RateLimiterService forgotPasswordIpRateLimiter(
+            @Value("${rate-limit.forgot-password.ip.capacity}") long capacity,
+            @Value("${rate-limit.forgot-password.ip.period-seconds}") long periodSeconds
+    ) {
+        return new RateLimiterService(capacity, Duration.ofSeconds(periodSeconds));
+    }
+
+    @Bean
+    public RateLimiterService forgotPasswordIpDailyRateLimiter(
+            @Value("${rate-limit.forgot-password.ip-daily.capacity}") long capacity,
+            @Value("${rate-limit.forgot-password.ip-daily.period-seconds}") long periodSeconds
+    ) {
+        return new RateLimiterService(capacity, Duration.ofSeconds(periodSeconds));
+    }
+
+    @Bean
+    public RateLimiterService resetPasswordIpRateLimiter(
+            @Value("${rate-limit.reset-password.ip.capacity}") long capacity,
+            @Value("${rate-limit.reset-password.ip.period-seconds}") long periodSeconds
+    ) {
+        return new RateLimiterService(capacity, Duration.ofSeconds(periodSeconds));
+    }
+
+    @Bean
+    public RateLimiterService resetPasswordEmailRateLimiter(
+            @Value("${rate-limit.reset-password.email.capacity}") long capacity,
+            @Value("${rate-limit.reset-password.email.period-seconds}") long periodSeconds
+    ) {
+        return new RateLimiterService(capacity, Duration.ofSeconds(periodSeconds));
+    }
 }

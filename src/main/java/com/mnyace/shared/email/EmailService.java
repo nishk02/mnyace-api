@@ -51,4 +51,20 @@ public class EmailService {
 
         mailSender.send(message);
     }
+
+    public void sendPasswordResetEmail(String toEmail, String code) {
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setFrom(fromAddress);
+        message.setTo(toEmail);
+        message.setSubject("Your MnyAce password reset code");
+        message.setText("""
+                Your MnyAce password reset code is:
+
+                %s
+
+                This code expires in 15 minutes. If you didn't request this, you can ignore this email; your password has not changed.
+                """.formatted(code));
+
+        mailSender.send(message);
+    }
 }

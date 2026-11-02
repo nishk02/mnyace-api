@@ -25,7 +25,8 @@ import java.util.HexFormat;
 import java.util.regex.Pattern;
 
 /**
- * Rate-limits POST /auth/signin, POST /auth/refresh, the invite POSTs and every /api/** call, ahead of
+ * Rate-limits POST /auth/signin, POST /auth/refresh, the invite POSTs, the forgot- and reset-password POSTs
+ * and every /api/** call, ahead of
  * JwtAuthFilter. These are permitAll (no JWT to gate them) — exactly why
  * they're worth protecting here: signin is the one place a password can be
  * guessed at all, and refresh is a DoS target because it does real work
@@ -45,6 +46,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final Pattern INVITE_ACTION_PATH =
             Pattern.compile("/auth/invites/[^/]+/(signup|verify-otp|resend-otp)");
 
+    // forgot-password sends mail (IP buckets only; the per-email and daily mail caps live in the service),
+    // reset-password takes guesses at a code (IP and email buckets).
+    private static final String FORGOT_PASSWORD_PATH = "/auth/forgot-password";
+    private static final String RESET_PASSWORD_PATH = "/auth/reset-password";
+
     // A signin body is an email, a password and an optional device label; anything near this is abuse.
     private static final int MAX_SIGNIN_BODY_BYTES = 4096;
 
@@ -53,6 +59,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final RateLimiterService refreshIpRateLimiter;
     private final RateLimiterService inviteIpRateLimiter;
     private final RateLimiterService apiIpRateLimiter;
+    private final RateLimiterService forgotPasswordIpRateLimiter;
+    private final RateLimiterService forgotPasswordIpDailyRateLimiter;
+    private final RateLimiterService resetPasswordIpRateLimiter;
+    private final RateLimiterService resetPasswordEmailRateLimiter;
     private final ObjectMapper objectMapper;
     private final SecurityEvents securityEvents;
 
@@ -62,6 +72,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @Qualifier("refreshIpRateLimiter") RateLimiterService refreshIpRateLimiter,
             @Qualifier("inviteIpRateLimiter") RateLimiterService inviteIpRateLimiter,
             @Qualifier("apiIpRateLimiter") RateLimiterService apiIpRateLimiter,
+            @Qualifier("forgotPasswordIpRateLimiter") RateLimiterService forgotPasswordIpRateLimiter,
+            @Qualifier("forgotPasswordIpDailyRateLimiter") RateLimiterService forgotPasswordIpDailyRateLimiter,
+            @Qualifier("resetPasswordIpRateLimiter") RateLimiterService resetPasswordIpRateLimiter,
+            @Qualifier("resetPasswordEmailRateLimiter") RateLimiterService resetPasswordEmailRateLimiter,
             ObjectMapper objectMapper,
             SecurityEvents securityEvents
     ) {
@@ -70,6 +84,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.refreshIpRateLimiter = refreshIpRateLimiter;
         this.inviteIpRateLimiter = inviteIpRateLimiter;
         this.apiIpRateLimiter = apiIpRateLimiter;
+        this.forgotPasswordIpRateLimiter = forgotPasswordIpRateLimiter;
+        this.forgotPasswordIpDailyRateLimiter = forgotPasswordIpDailyRateLimiter;
+        this.resetPasswordIpRateLimiter = resetPasswordIpRateLimiter;
+        this.resetPasswordEmailRateLimiter = resetPasswordEmailRateLimiter;
         this.objectMapper = objectMapper;
         this.securityEvents = securityEvents;
     }
@@ -99,7 +117,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         boolean isInviteAction = isPost(request) && INVITE_ACTION_PATH.matcher(path).matches();
 
-        if (!isSignin && !isRefresh && !isInviteAction) {
+        boolean isForgotPassword = isPost(request) && FORGOT_PASSWORD_PATH.equals(path);
+        boolean isResetPassword = isPost(request) && RESET_PASSWORD_PATH.equals(path);
+
+        if (!isSignin && !isRefresh && !isInviteAction && !isForgotPassword && !isResetPassword) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -113,6 +134,46 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 return;
             }
             filterChain.doFilter(request, response);
+            return;
+        }
+
+        if (isForgotPassword) {
+            RateLimiterService.Decision shortWindow = forgotPasswordIpRateLimiter.consume(clientIp);
+            if (!shortWindow.allowed()) {
+                rejectWithTooManyRequests(response, shortWindow.retryAfterSeconds(), "forgot_password_ip");
+                return;
+            }
+            RateLimiterService.Decision daily = forgotPasswordIpDailyRateLimiter.consume(clientIp);
+            if (!daily.allowed()) {
+                rejectWithTooManyRequests(response, daily.retryAfterSeconds(), "forgot_password_ip_daily");
+                return;
+            }
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        if (isResetPassword) {
+            RateLimiterService.Decision ipDecision = resetPasswordIpRateLimiter.consume(clientIp);
+            if (!ipDecision.allowed()) {
+                rejectWithTooManyRequests(response, ipDecision.retryAfterSeconds(), "reset_password_ip");
+                return;
+            }
+            CachedBodyHttpServletRequest cachedRequest;
+            try {
+                cachedRequest = new CachedBodyHttpServletRequest(request, MAX_SIGNIN_BODY_BYTES);
+            } catch (CachedBodyHttpServletRequest.BodyTooLargeException e) {
+                rejectWithPayloadTooLarge(response);
+                return;
+            }
+            String email = extractEmail(cachedRequest.getBody());
+            if (email != null) {
+                RateLimiterService.Decision emailDecision = resetPasswordEmailRateLimiter.consume(email);
+                if (!emailDecision.allowed()) {
+                    rejectWithTooManyRequests(response, emailDecision.retryAfterSeconds(), "reset_password_email");
+                    return;
+                }
+            }
+            filterChain.doFilter(cachedRequest, response);
             return;
         }
 
