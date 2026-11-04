@@ -1,5 +1,6 @@
 package com.mnyace.auth;
 
+import com.mnyace.shared.util.EmailMasker;
 import com.mnyace.shared.util.EmailNormalizer;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -46,7 +47,7 @@ public class AdminBootstrapRunner implements CommandLineRunner {
         admin.setRole("ADMIN");
         userRepository.save(admin);
 
-        log.info("Bootstrapped initial admin account: {}", adminEmail);
+        log.info("Bootstrapped initial admin account: {}", EmailMasker.mask(adminEmail));
     }
 
     /** An unset secret reaches the app as an empty string, so blank means "use the default". */
