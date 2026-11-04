@@ -3,7 +3,7 @@
 #
 # Secrets live in the dotenv file in the repo root, loaded in dev by application.properties.
 # Plain KEY=value lines (no quotes, no export). Keys: MAIL_USERNAME, MAIL_PASSWORD, ADMIN_EMAIL,
-# ADMIN_PASSWORD, TEST_USER_EMAIL, TEST_USER_PASSWORD, JWT_SECRET. Reference them as ${KEY} below.
+# ADMIN_PASSWORD, ADMIN_FIRST_NAME, ADMIN_LAST_NAME, TEST_USER_EMAIL, TEST_USER_PASSWORD, JWT_SECRET. Reference them as ${KEY} below.
 
 spring.profiles.active=dev
 

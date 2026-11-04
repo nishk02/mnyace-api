@@ -23,6 +23,12 @@ public class AdminBootstrapRunner implements CommandLineRunner {
     @Value("${admin.bootstrap.password:}")
     private String adminPassword;
 
+    @Value("${admin.bootstrap.first-name:}")
+    private String adminFirstName;
+
+    @Value("${admin.bootstrap.last-name:}")
+    private String adminLastName;
+
     @Override
     public void run(String... args) {
         if (adminEmail.isBlank() || adminPassword.isBlank()) {
@@ -33,13 +39,18 @@ public class AdminBootstrapRunner implements CommandLineRunner {
         }
 
         User admin = new User();
-        admin.setFirstName("Admin");
-        admin.setLastName("User");
+        admin.setFirstName(orDefault(adminFirstName, "Admin"));
+        admin.setLastName(orDefault(adminLastName, "User"));
         admin.setEmail(EmailNormalizer.normalize(adminEmail));
         admin.setPasswordHash(passwordEncoder.encode(adminPassword));
         admin.setRole("ADMIN");
         userRepository.save(admin);
 
         log.info("Bootstrapped initial admin account: {}", adminEmail);
+    }
+
+    /** An unset secret reaches the app as an empty string, so blank means "use the default". */
+    private static String orDefault(String value, String fallback) {
+        return value == null || value.isBlank() ? fallback : value.trim();
     }
 }

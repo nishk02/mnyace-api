@@ -60,7 +60,8 @@ public class InviteService {
 
         Invite saved = inviteRepository.save(invite);
         securityEvents.record(SecurityEvent.INVITE_CREATED, adminUserId, null, Map.of("invite_id", saved.getId()));
-        emailService.sendInviteEmail(saved.getEmail(), saved.getToken());
+        emailService.sendInviteEmail(saved.getEmail(), saved.getToken(),
+                (admin.getFirstName() + " " + admin.getLastName()).trim(), admin.getEmail());
 
         long registeredMembers = userRepository.countByRole("MEMBER");
         String warning = registeredMembers >= maxUsers

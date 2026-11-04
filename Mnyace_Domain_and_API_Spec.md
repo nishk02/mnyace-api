@@ -825,7 +825,7 @@ com.mnyace
 │   ├── SessionController.java        GET /api/sessions (list), DELETE /api/sessions/{id} (one device), DELETE /api/sessions (every device)
 │   ├── SessionService.java           the caller's live sessions, one entry per sign-in
 │   ├── AuthService.java
-│   ├── AdminBootstrapRunner.java     Seeds the first ADMIN from env vars at startup
+│   ├── AdminBootstrapRunner.java     Seeds the first ADMIN (email, password, first and last name) from env vars at startup
 │   ├── RefreshTokenService.java      Thin orchestrator — hash, dispatch to Revoker/Issuer, nothing @Transactional
 │   ├── RefreshTokenRevoker.java      Reuse-detection check + rotation, own transaction boundary — see BR-26
 │   ├── RefreshTokenIssuer.java       Mints a new RefreshToken row — shared by sign-in and rotation
@@ -2023,7 +2023,7 @@ A category with `isInternal = true` (currently just `Opening Balance`, `cat-35`)
 **Why this exists:** without it, a client could tag an ordinary expense with `Opening Balance`'s category ID, which would silently count that expense as opening-balance inflow in Dashboard's `balancePercentage` calculation (§6) — corrupting a metric that's supposed to reflect real onboarding funding, not an arbitrary transaction a user (or a bug) happened to mislabel.
 
 ### BR-18: Invite-Based Onboarding & OTP Security
-Replaces open self-registration entirely (`POST /auth/signup` removed, v1.4.0). A new `User` is created in exactly two ways: `AdminBootstrapRunner` seeds the first `ADMIN` from env vars at startup (solving the chicken-and-egg problem of nobody existing yet to send the first invite), and every subsequent `User` is `MEMBER`, created only through this flow.
+Replaces open self-registration entirely (`POST /auth/signup` removed, v1.4.0). A new `User` is created in exactly two ways: `AdminBootstrapRunner` seeds the first `ADMIN` from env vars at startup, using `ADMIN_FIRST_NAME` and `ADMIN_LAST_NAME` for the name that invite emails show as the inviter, "Admin User" if they are blank (solving the chicken-and-egg problem of nobody existing yet to send the first invite), and every subsequent `User` is `MEMBER`, created only through this flow.
 
 **The three-step state machine:** `PENDING` (admin created the invite, email sent) → `AWAITING_OTP` (invited person submitted name/password, code sent) → `COMPLETED` (code verified, `User` created). The `User` row does not exist until the final step — `pendingFirstName`/`pendingLastName`/`pendingPasswordHash` hold the staged details in the interim, cleared the instant they're promoted to a real `User`.
 
