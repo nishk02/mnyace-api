@@ -947,6 +947,8 @@ com.mnyace
     │       ├── SecurityEvent.java    Catalogue of security events — see BR-28
     │       ├── SecurityEvents.java   Writes one JSON line per event
     │       └── RequestIdFilter.java  Server-generated id per request, also returned as X-Request-Id
+    ├── health/
+    │   └── HealthController.java     GET /api/health — public readiness check (touches the database)
     ├── email/
     │   └── EmailService.java         Invite + OTP emails (Brevo SMTP)
     ├── exception/
@@ -964,7 +966,7 @@ com.mnyace
 
 ## 6. Complete API Contract
 
-**Paths.** Everything is served under `/api`, except `/auth/**` (public, no prefix). Throughout this document paths are written without the prefix (`GET /accounts` is `GET /api/accounts`); a few places, such as `/api/admin/invites`, show it in full.
+**Paths.** Everything is served under `/api`, except `/auth/**` (public, no prefix); `GET /api/health` is public too. Throughout this document paths are written without the prefix (`GET /accounts` is `GET /api/accounts`); a few places, such as `/api/admin/invites`, show it in full.
 
 ### Standard Response Envelope
 
@@ -1017,7 +1019,7 @@ Both `warning` and `info` are omitted (`@JsonInclude NON_NULL`) whenever null �
 ```
 `details` is omitted (`@JsonInclude NON_NULL`, on both the outer error and the nested payload) on every other error — it exists only for this specific insufficient-free-balance case, so the client can render the allocation picker directly from the error rather than a second round trip.
 
-All endpoints require `Authorization: Bearer {jwt}` except `/auth/**`.
+All endpoints require `Authorization: Bearer {jwt}` except `/auth/**` and `GET /health`.
 
 ---
 
@@ -1158,6 +1160,19 @@ On success every refresh token of the user is revoked, so all other devices are 
 **400:** `INVALID_CURRENT_PASSWORD` — deliberately a `400`, not a `401`: clients treat a `401` as an expired session and would sign the user out over a typo. Also `400` for a weak or over-long new password, a mismatched confirmation, or a new password equal to the current one.
 **401:** missing or invalid access token.
 **429:** `TOO_MANY_REQUESTS` after 5 attempts per user in 15 minutes (BR-27). Without a cap, someone holding a stolen access token could use the current-password check to test password guesses.
+
+---
+
+### Health
+
+#### GET /health — public
+Readiness check for clients that need to know whether the API is up again, for example after the "updating" reply below. No token is needed, and a stale token is ignored. It runs a trivial query, so `UP` means the API can reach its database, and it carries no version, stack or other details. The database answer is reused for 2 seconds, so a burst of calls touches the database at most once every 2 seconds and cannot compete with real requests for its connections. Every answer has `Cache-Control: no-store`.
+
+**Response 200:** `{ "status": "UP" }`
+**503:** `{ "status": "DOWN" }` — the database did not answer.
+**429:** `TOO_MANY_REQUESTS` with `Retry-After` once the IP has exceeded the health limit (BR-27).
+
+**While the API restarts**, the proxy in front of it answers `502`, `503` and `504` itself with `503`, `Retry-After: 30` and `{ "success": false, "error": { "code": "SERVICE_UNAVAILABLE", "message": "We're updating. Back in a minute." } }`. That reply carries the same CORS headers as the API, for the same origins as `cors.allowed-origins` in prod (a test keeps the two lists equal): `Access-Control-Allow-Origin` echoing the request origin, `Access-Control-Allow-Credentials: true`, `Access-Control-Expose-Headers: Retry-After, X-Request-Id` and `Vary: Origin`, so a browser lets the web app read it. An origin not on the list gets no CORS headers. A preflight `OPTIONS` from an allowed origin during the outage gets `204` with the API's allowed methods and headers and `Access-Control-Max-Age: 60`, so a cached preflight cannot outlive the outage.
 
 ---
 
@@ -2195,6 +2210,8 @@ Both endpoints are `permitAll` by necessity — there's no JWT yet to gate them 
 
 **Password recovery adds four buckets**, all per IP or per email and held in memory like the rest. `/auth/forgot-password` has a per-IP bucket (`rate-limit.forgot-password.ip.*`, default 5 per 900s) and a daily per-IP bucket (`rate-limit.forgot-password.ip-daily.*`, default 10 per 86400s), reasons `forgot_password_ip` and `forgot_password_ip_daily`. `/auth/reset-password` has a per-IP bucket (`rate-limit.reset-password.ip.*`, default 10 per 900s) and a per-email bucket (`rate-limit.reset-password.email.*`, default 10 per 900s), reasons `reset_password_ip` and `reset_password_email`; its body is read (4 KB cap) for the normalized email, as for sign-in. The per-email and daily mail caps for `forgot-password` are counted from the database rather than held in memory, so a restart cannot reset them — see BR-29.
 
+**`GET /api/health` has its own per-IP bucket** (`rate-limit.health.ip.*`, default 120 per 60s), reason `health_ip`, and does not count toward the shared `/api/**` bucket below. Clients poll it while showing the "updating" notice, so a separate bucket keeps that from using up the budget real calls share. Over the limit the answer is `429 TOO_MANY_REQUESTS` with `Retry-After`.
+
 **Every `/api/**` request shares one per-IP bucket** (`rate-limit.api.ip.*`, default 300 per 60s) as a flood guard. The filter runs before the JWT check, so unauthenticated floods count too, and `OPTIONS` preflights do not. Over the limit the response is `429 TOO_MANY_REQUESTS` with `Retry-After`, and a `rate_limited` event with reason `api_ip` is logged. The limit is per IP, so many users behind one carrier or office address share it.
 
 **Password changes have their own per-user bucket** (`rate-limit.password-change.user.*`, default 5 per 900s), consumed by the service after the request shape is validated and before the current password is checked. It is keyed on the user, not the IP, because the caller is already authenticated.
@@ -2207,7 +2224,7 @@ Both endpoints are `permitAll` by necessity — there's no JWT yet to gate them 
 
 Security-relevant actions leave an audit trail separate from ordinary application logs, so "was this account attacked yesterday?" can be answered from a log, not from memory.
 
-**One JSON line per event, using Elastic Common Schema field names**, so dashboards and alert rules in common log tools read it without translation: `@timestamp` (UTC), `event.category` / `event.action` / `event.outcome` (`success` or `failure`) / `event.reason`, `user.id`, `source.ip`, `user_agent.original` (capped at 200 characters), `http.request.id`, `service.name`, `service.environment`, and a small `labels` object for related ids. The events live in one catalogue (`SecurityEvent`): sign-in success and failure (`reason` `unknown_user` or `wrong_password`), `signout_all`, `signout_session` (with the session family), `rate_limited` (`reason` is the bucket that tripped: `signin_ip`, `signin_email`, `refresh_ip`, `invite_ip`, `api_ip`, `password_change_user`), `refresh_token_reuse` (with the session family), `password_change` success and failure, `password_reset_request` (existing accounts only), `password_reset` success and failure (`reason` `unknown_user`, `no_open_code`, `expired`, `attempts_exhausted`, `wrong_code` or `already_used`; never the code), `otp_lockout` (reason `password_reset_max_attempts` for a reset code), and `invite_create`. The `rate_limited` reasons also include `forgot_password_ip`, `forgot_password_ip_daily`, `reset_password_ip`, `reset_password_email`, `forgot_password_email_daily` and `mail_budget_daily`.
+**One JSON line per event, using Elastic Common Schema field names**, so dashboards and alert rules in common log tools read it without translation: `@timestamp` (UTC), `event.category` / `event.action` / `event.outcome` (`success` or `failure`) / `event.reason`, `user.id`, `source.ip`, `user_agent.original` (capped at 200 characters), `http.request.id`, `service.name`, `service.environment`, and a small `labels` object for related ids. The events live in one catalogue (`SecurityEvent`): sign-in success and failure (`reason` `unknown_user` or `wrong_password`), `signout_all`, `signout_session` (with the session family), `rate_limited` (`reason` is the bucket that tripped: `signin_ip`, `signin_email`, `refresh_ip`, `invite_ip`, `api_ip`, `password_change_user`), `refresh_token_reuse` (with the session family), `password_change` success and failure, `password_reset_request` (existing accounts only), `password_reset` success and failure (`reason` `unknown_user`, `no_open_code`, `expired`, `attempts_exhausted`, `wrong_code` or `already_used`; never the code), `otp_lockout` (reason `password_reset_max_attempts` for a reset code), and `invite_create`. The `rate_limited` reasons also include `forgot_password_ip`, `forgot_password_ip_daily`, `reset_password_ip`, `reset_password_email`, `forgot_password_email_daily`, `mail_budget_daily` and `health_ip`.
 
 **What is never logged:** passwords, access or refresh tokens, OTP codes, invite tokens, and email addresses. People are identified by `user.id` only, a random UUID that is not derived from anything personal and is not a credential: knowing it grants no access, because every request is authorized from the access token and per-record ownership is enforced. The id and the IP address are still personal data (pseudonymous), so the log is treated as such: short retention and restricted access.
 

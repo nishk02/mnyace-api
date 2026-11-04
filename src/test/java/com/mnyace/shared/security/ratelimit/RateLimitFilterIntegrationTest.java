@@ -27,7 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.datasource.url=jdbc:sqlite:target/rate-limit-it.db",
         "jwt.secret=test-secret-test-secret-test-secret-123456",
         // near-zero refill, so a slow runner cannot earn tokens back mid-test
-        "rate-limit.api.ip.period-seconds=86400"
+        "rate-limit.api.ip.period-seconds=86400",
+        "rate-limit.health.ip.period-seconds=86400"
 })
 class RateLimitFilterIntegrationTest {
     @LocalServerPort
@@ -53,6 +54,9 @@ class RateLimitFilterIntegrationTest {
 
     @Value("${rate-limit.api.ip.capacity}")
     private int apiIpCapacity;
+
+    @Value("${rate-limit.health.ip.capacity}")
+    private int healthIpCapacity;
 
     private final HttpClient client = HttpClient.newHttpClient();
 
@@ -159,6 +163,27 @@ class RateLimitFilterIntegrationTest {
             assertThat(get("/api/%64ashboard", "10.3.0.3").statusCode()).isNotEqualTo(429);
         }
         assertThat(get("/api/%64ashboard", "10.3.0.3").statusCode()).isEqualTo(429);
+    }
+
+    @Test
+    void health_plainPath_isRateLimitedPerIp_withItsOwnBucket() throws Exception {
+        for (int i = 0; i < healthIpCapacity; i++) {
+            assertThat(get("/api/health", "10.3.0.4").statusCode()).isEqualTo(200);
+        }
+        HttpResponse<String> limited = get("/api/health", "10.3.0.4");
+        assertThat(limited.statusCode()).isEqualTo(429);
+        assertThat(limited.headers().firstValue("Retry-After")).isPresent();
+        assertThat(get("/api/health", "10.3.0.5").statusCode()).as("another IP is unaffected").isEqualTo(200);
+        assertThat(get("/api/dashboard", "10.3.0.4").statusCode())
+                .as("health calls never charged the shared /api bucket").isNotEqualTo(429);
+    }
+
+    @Test
+    void health_percentEncodedPath_isRateLimitedPerIp() throws Exception {
+        for (int i = 0; i < healthIpCapacity; i++) {
+            assertThat(get("/api/%68ealth", "10.3.0.6").statusCode()).isNotEqualTo(429);
+        }
+        assertThat(get("/api/%68ealth", "10.3.0.6").statusCode()).isEqualTo(429);
     }
 
     private void assertLimitedAfter(
