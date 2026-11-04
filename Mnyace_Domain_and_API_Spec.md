@@ -1166,7 +1166,7 @@ On success every refresh token of the user is revoked, so all other devices are 
 ### Health
 
 #### GET /health — public
-Readiness check for clients that need to know whether the API is up again, for example after the "updating" reply below. No token is needed, and a stale token is ignored. It runs a trivial query, so `UP` means the API can reach its database, and it carries no version, stack or other details. Every answer has `Cache-Control: no-store`.
+Readiness check for clients that need to know whether the API is up again, for example after the "updating" reply below. No token is needed, and a stale token is ignored. It runs a trivial query, so `UP` means the API can reach its database, and it carries no version, stack or other details. The database answer is reused for 2 seconds, so a burst of calls touches the database at most once every 2 seconds and cannot compete with real requests for its connections. Every answer has `Cache-Control: no-store`.
 
 **Response 200:** `{ "status": "UP" }`
 **503:** `{ "status": "DOWN" }` — the database did not answer.
