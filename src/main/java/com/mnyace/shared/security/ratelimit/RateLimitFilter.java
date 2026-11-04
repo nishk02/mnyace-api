@@ -48,6 +48,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     // forgot-password sends mail (IP buckets only; the per-email and daily mail caps live in the service),
     // reset-password takes guesses at a code (IP and email buckets).
+    private static final String HEALTH_PATH = "/api/health";
     private static final String FORGOT_PASSWORD_PATH = "/auth/forgot-password";
     private static final String RESET_PASSWORD_PATH = "/auth/reset-password";
 
@@ -59,6 +60,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private final RateLimiterService refreshIpRateLimiter;
     private final RateLimiterService inviteIpRateLimiter;
     private final RateLimiterService apiIpRateLimiter;
+    private final RateLimiterService healthIpRateLimiter;
     private final RateLimiterService forgotPasswordIpRateLimiter;
     private final RateLimiterService forgotPasswordIpDailyRateLimiter;
     private final RateLimiterService resetPasswordIpRateLimiter;
@@ -72,6 +74,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             @Qualifier("refreshIpRateLimiter") RateLimiterService refreshIpRateLimiter,
             @Qualifier("inviteIpRateLimiter") RateLimiterService inviteIpRateLimiter,
             @Qualifier("apiIpRateLimiter") RateLimiterService apiIpRateLimiter,
+            @Qualifier("healthIpRateLimiter") RateLimiterService healthIpRateLimiter,
             @Qualifier("forgotPasswordIpRateLimiter") RateLimiterService forgotPasswordIpRateLimiter,
             @Qualifier("forgotPasswordIpDailyRateLimiter") RateLimiterService forgotPasswordIpDailyRateLimiter,
             @Qualifier("resetPasswordIpRateLimiter") RateLimiterService resetPasswordIpRateLimiter,
@@ -84,6 +87,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         this.refreshIpRateLimiter = refreshIpRateLimiter;
         this.inviteIpRateLimiter = inviteIpRateLimiter;
         this.apiIpRateLimiter = apiIpRateLimiter;
+        this.healthIpRateLimiter = healthIpRateLimiter;
         this.forgotPasswordIpRateLimiter = forgotPasswordIpRateLimiter;
         this.forgotPasswordIpDailyRateLimiter = forgotPasswordIpDailyRateLimiter;
         this.resetPasswordIpRateLimiter = resetPasswordIpRateLimiter;
@@ -103,9 +107,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String path = request.getServletPath();
 
         if (path.startsWith("/api/") && !"OPTIONS".equalsIgnoreCase(request.getMethod())) {
-            RateLimiterService.Decision decision = apiIpRateLimiter.consume(bucketKeyFor(ClientIp.of(request)));
+            // The app polls the health check while showing "updating"; its own bucket keeps that from using up the shared one.
+            boolean isHealth = HEALTH_PATH.equals(path);
+            RateLimiterService.Decision decision =
+                    (isHealth ? healthIpRateLimiter : apiIpRateLimiter).consume(bucketKeyFor(ClientIp.of(request)));
             if (!decision.allowed()) {
-                rejectWithTooManyRequests(response, decision.retryAfterSeconds(), "api_ip");
+                rejectWithTooManyRequests(response, decision.retryAfterSeconds(), isHealth ? "health_ip" : "api_ip");
                 return;
             }
             filterChain.doFilter(request, response);

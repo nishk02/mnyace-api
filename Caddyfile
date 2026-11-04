@@ -20,9 +20,30 @@
     reverse_proxy api:8080
 
     # Answer 503 with Retry-After instead of 502 while the api restarts.
+    # The reply carries CORS headers for the same origins the api allows
+    # (cors.allowed-origins in application-prod.properties; a test keeps the two lists equal),
+    # so the web app can read it instead of seeing a network failure.
     handle_errors {
         @down expression {http.error.status_code} in [502, 503, 504]
+        @allowedOrigin expression {http.request.header.Origin} in ["capacitor://localhost", "ionic://localhost", "https://app.mnyace.com"]
+        @preflight expression {http.error.status_code} in [502, 503, 504] && {http.request.method} == "OPTIONS" && {http.request.header.Origin} in ["capacitor://localhost", "ionic://localhost", "https://app.mnyace.com"]
+
+        # A preflight during an outage is answered here, so the browser goes on to send the real request.
+        handle @preflight {
+            header Access-Control-Allow-Origin "{http.request.header.Origin}"
+            header Access-Control-Allow-Credentials "true"
+            header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+            header Access-Control-Allow-Headers "Authorization, Content-Type, Accept, X-Client-Platform"
+            header Access-Control-Max-Age "60"
+            header Vary Origin
+            respond 204
+        }
+
         handle @down {
+            header Vary Origin
+            header @allowedOrigin Access-Control-Allow-Origin "{http.request.header.Origin}"
+            header @allowedOrigin Access-Control-Allow-Credentials "true"
+            header @allowedOrigin Access-Control-Expose-Headers "Retry-After, X-Request-Id"
             header Retry-After 30
             header Content-Type application/json
             respond `{"success":false,"error":{"code":"SERVICE_UNAVAILABLE","message":"We're updating. Back in a minute."}}` 503

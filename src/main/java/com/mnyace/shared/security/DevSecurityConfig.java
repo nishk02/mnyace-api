@@ -3,6 +3,7 @@ package com.mnyace.shared.security;
 import com.mnyace.shared.security.ratelimit.RateLimitFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.HttpMethod;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -39,7 +40,9 @@ public class DevSecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .exceptionHandling(exception -> exception.authenticationEntryPoint(jwtAuthEntryPoint))
                 .authorizeHttpRequests(auth ->
-                        auth.requestMatchers("/auth/**", "/error").permitAll().anyRequest().authenticated())
+                        auth.requestMatchers("/auth/**", "/error").permitAll()
+                                .requestMatchers(HttpMethod.GET, "/api/health").permitAll()
+                                .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(rateLimitFilter, JwtAuthFilter.class);
 
