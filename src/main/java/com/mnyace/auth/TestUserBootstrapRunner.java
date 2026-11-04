@@ -1,5 +1,6 @@
 package com.mnyace.auth;
 
+import com.mnyace.shared.util.EmailMasker;
 import com.mnyace.shared.util.EmailNormalizer;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
@@ -52,6 +53,6 @@ public class TestUserBootstrapRunner implements CommandLineRunner {
         user.setRole("MEMBER");
         userRepository.save(user);
 
-        log.info("Bootstrapped test member account: {}", email);
+        log.info("Bootstrapped test member account: {}", EmailMasker.mask(email));
     }
 }
