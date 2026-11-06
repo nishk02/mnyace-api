@@ -35,7 +35,7 @@ FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --only-upgrade libssl3 \
+    && apt-get install -y --only-upgrade libssl3 apt libapt-pkg6.0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Running as root inside a container is unnecessary risk - if the app were
