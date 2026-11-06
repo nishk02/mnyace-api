@@ -21,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -68,14 +69,21 @@ public class DashboardService {
                 .map(Account::getCurrentBalance)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
+        Map<GoalResponse, BigDecimal> creditByGoal = new IdentityHashMap<>();
         List<GoalResponse> activeNonUpcomingGoals = activeGoals.stream()
                 .filter(g -> !"COMPLETED".equals(g.getStatus()))
-                .map(g -> GoalResponse.from(g, goalCreditService.creditedThisMonth(g)))
+                .map(g -> {
+                    BigDecimal credited = goalCreditService.creditedThisMonth(g);
+                    GoalResponse response = GoalResponse.from(g, credited);
+                    creditByGoal.put(response, credited);
+                    return response;
+                })
                 .filter(r -> !r.isUpcoming())
                 .toList();
 
+        // Pace before this month's credit is netted: savedThisMonth is subtracted once, in the message.
         BigDecimal monthlyTarget = activeNonUpcomingGoals.stream()
-                .map(GoalResponse::currentMonthlySavingsRequired)
+                .map(r -> r.currentMonthlySavingsRequired().add(creditByGoal.get(r)))
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         // Saved this month
