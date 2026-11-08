@@ -10,6 +10,7 @@ import com.mnyace.shared.security.audit.SecurityEvents;
 import com.mnyace.shared.util.PasswordRules;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -80,6 +81,7 @@ public class InviteService {
         Invite invite = getInviteOrThrow(token);
         requireStatus(invite, InviteStatus.PENDING, "This invite has already been used or is awaiting a code.");
         requireNotExpired(invite);
+        requireNoExistingAccount(invite);
 
         if (!request.password().equals(request.confirmPassword())) {
             throw ApiException.badRequest("Passwords do not match");
@@ -101,6 +103,9 @@ public class InviteService {
     public InviteResponse getInviteInfo(String token) {
         Invite invite = getInviteOrThrow(token);
         requireNotExpired(invite);
+        if (invite.getStatus() != InviteStatus.COMPLETED) {
+            requireNoExistingAccount(invite);
+        }
 
         return InviteResponse.from(invite);
     }
@@ -113,6 +118,7 @@ public class InviteService {
         Invite invite = getInviteOrThrow(token);
         requireStatus(invite, InviteStatus.AWAITING_OTP, "This invite is not awaiting a verification code.");
         requireNotExpired(invite);
+        requireNoExistingAccount(invite);
 
         if (invite.getOtpExpiresAt() == null || invite.getOtpExpiresAt().isBefore(LocalDateTime.now())) {
             throw ApiException.badRequest("This code has expired. Request a new one.");
@@ -123,6 +129,10 @@ public class InviteService {
 
         // Spend the guess before checking it, so a burst of parallel requests is capped too.
         if (inviteRepository.consumeOtpAttempt(invite.getId(), MAX_OTP_ATTEMPTS) == 0) {
+            // No row to spend a guess on can also mean a concurrent sign-up just deleted this invite.
+            if (!inviteRepository.existsById(invite.getId())) {
+                throw ApiException.notFound("Invite not found or expired");
+            }
             securityEvents.record(SecurityEvent.OTP_LOCKOUT, null, "max_attempts_reached", Map.of("invite_id", invite.getId()));
             throw ApiException.badRequest("Too many incorrect attempts. Ask for a new invite.");
         }
@@ -137,7 +147,7 @@ public class InviteService {
         user.setEmail(EmailNormalizer.normalize(invite.getEmail()));
         user.setPasswordHash(invite.getPendingPasswordHash());
         user.setRole("MEMBER");
-        User savedUser = userRepository.save(user);
+        User savedUser = saveNewMember(user);
 
         // Clear staged secrets now that they've done their job - no reason a
         // completed invite row should keep holding a password hash forever.
@@ -145,6 +155,7 @@ public class InviteService {
         invite.setPendingPasswordHash(null);
         invite.setOtpCodeHash(null);
         inviteRepository.save(invite);
+        inviteRepository.deleteOthersForEmail(invite.getEmail(), invite.getId());
 
         RefreshTokenIssuer.IssuedRefreshToken refreshToken = refreshTokenService.issueNewFamily(savedUser, request.deviceLabel());
         String accessToken = jwtUtil.generateToken(savedUser.getId(), savedUser.getEmail(), savedUser.getRole(), refreshToken.familyId());
@@ -160,6 +171,7 @@ public class InviteService {
         Invite invite = getInviteOrThrow(token);
         requireStatus(invite, InviteStatus.AWAITING_OTP, "This invite is not awaiting a verification code.");
         requireNotExpired(invite);
+        requireNoExistingAccount(invite);
 
         LocalDateTime cooldownEnds = invite.getUpdatedAt().plusSeconds(RESEND_COOLDOWN_SECONDS);
         if (cooldownEnds.isAfter(LocalDateTime.now())) {
@@ -180,12 +192,34 @@ public class InviteService {
 
     private Invite getInviteOrThrow(String token) {
         return inviteRepository.findByToken(token)
-                .orElseThrow(() -> ApiException.notFound("Invite not found"));
+                .orElseThrow(() -> ApiException.notFound("Invite not found or expired"));
     }
 
     private void requireStatus(Invite invite, InviteStatus expected, String message) {
         if (invite.getStatus() != expected) {
             throw ApiException.conflict(message);
+        }
+    }
+
+    /** Concurrent completions for one email can both pass the pre-check; the unique index lets one in, the rest read as unknown. */
+    private User saveNewMember(User user) {
+        try {
+            return userRepository.saveAndFlush(user);
+        } catch (DataAccessException e) {
+            if (userRepository.existsByEmailIgnoreCase(user.getEmail())) {
+                throw ApiException.notFound("Invite not found or expired");
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Backstop for an account created another way since this invite was issued. Answers exactly like an
+     * unknown token, so the response never says whether an email is registered.
+     */
+    private void requireNoExistingAccount(Invite invite) {
+        if (userRepository.existsByEmailIgnoreCase(invite.getEmail())) {
+            throw ApiException.notFound("Invite not found or expired");
         }
     }
 

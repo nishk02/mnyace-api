@@ -2,7 +2,10 @@ package com.mnyace.invite;
 
 import com.mnyace.auth.AuthIntegrationTestBase;
 import com.mnyace.shared.email.EmailService;
+import com.mnyace.auth.User;
+import com.mnyace.auth.UserRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
@@ -26,6 +29,9 @@ class InviteOtpTest extends AuthIntegrationTestBase {
 
     @MockitoBean
     private EmailService emailService;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Test
     void fullFlow_createsAMemberWhoCanSignIn() {
@@ -94,6 +100,96 @@ class InviteOtpTest extends AuthIntegrationTestBase {
         pool.shutdown();
 
         assertThat(evaluated).isLessThanOrEqualTo(10);
+    }
+
+    @Test
+    void completingASignup_invalidatesTheOtherInvitesForThatEmail() {
+        String email = uniqueEmail();
+        String first = createInvite(email);
+        String second = createInvite(email);
+        String pending = createInvite(email);
+        submitSignup(first);
+        String firstCode = lastOtpFor(email);
+        submitSignup(second);
+        String secondCode = lastOtpFor(email);
+
+        assertThat(verifyOtp(first, firstCode).statusCode()).isEqualTo(200);
+
+        assertThat(get("/auth/invites/" + pending).statusCode()).isEqualTo(404);
+        assertThat(submitSignup(pending).statusCode()).isEqualTo(404);
+        assertThat(post("/auth/invites/" + second + "/resend-otp", "", "X-Forwarded-For", freshIp()).statusCode())
+                .isEqualTo(404);
+        assertThat(verifyOtp(second, secondCode).statusCode()).isEqualTo(404);
+    }
+
+    @Test
+    void parallelCompletionsForOneEmail_createOneAccountAndNoServerErrors() throws Exception {
+        String email = uniqueEmail();
+        int callers = 3;
+        List<String> tokens = new ArrayList<>();
+        List<String> codes = new ArrayList<>();
+        for (int i = 0; i < callers; i++) {
+            String token = createInvite(email);
+            submitSignup(token);
+            tokens.add(token);
+            codes.add(lastOtpFor(email));
+        }
+
+        ExecutorService pool = Executors.newFixedThreadPool(callers);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<HttpResponse<String>>> futures = new ArrayList<>();
+        for (int i = 0; i < callers; i++) {
+            String token = tokens.get(i);
+            String code = codes.get(i);
+            Callable<HttpResponse<String>> call = () -> {
+                start.await();
+                return verifyOtp(token, code);
+            };
+            futures.add(pool.submit(call));
+        }
+        start.countDown();
+
+        for (Future<HttpResponse<String>> f : futures) {
+            int status = f.get().statusCode();
+            // 503 is the existing "database busy, retry" answer when SQLite's single writer is held
+            assertThat(status).isIn(200, 404, 503);
+        }
+        pool.shutdown();
+
+        assertThat(userRepository.existsByEmailIgnoreCase(email)).isTrue();
+    }
+
+    @Test
+    void anAccountCreatedAnotherWay_makesTheInviteLookUnknown() {
+        String email = uniqueEmail();
+        String token = createInvite(email);
+        submitSignup(token);
+        String code = lastOtpFor(email);
+        User user = new User();
+        user.setFirstName("Other");
+        user.setLastName("Route");
+        user.setEmail(email);
+        user.setPasswordHash("hash");
+        user.setRole("MEMBER");
+        userRepository.save(user);
+
+        HttpResponse<String> response = verifyOtp(token, code);
+
+        assertThat(response.statusCode()).isEqualTo(404);
+        assertThat(json(response).path("error").path("message").asText()).isEqualTo("Invite not found or expired");
+    }
+
+    @Test
+    void aCompletedInvite_stillReportsItsStatus() {
+        String email = uniqueEmail();
+        String token = createInvite(email);
+        submitSignup(token);
+        verifyOtp(token, lastOtpFor(email));
+
+        HttpResponse<String> info = get("/auth/invites/" + token);
+
+        assertThat(info.statusCode()).isEqualTo(200);
+        assertThat(json(info).path("data").path("status").asText()).isEqualTo("COMPLETED");
     }
 
     private String createInvite(String email) {

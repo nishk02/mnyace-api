@@ -1218,7 +1218,7 @@ Lets the frontend show "you're registering as `{email}`" before the person types
 ```
 Same response shape as invite creation above — deliberately reuses `InviteResponse` rather than a second DTO. Safe to leave unauthenticated for the same reason `signup`/`verify-otp`/`resend-otp` are: the token itself (32 random bytes) is the access control, and whoever has it already received it via an email addressed to them — this endpoint reveals nothing they don't already implicitly know.
 **400:** invite expired (same as the other invite endpoints — see BR-18)
-**404:** token doesn't exist
+**404:** `Invite not found or expired` — the token doesn't exist, was removed when another invite for the same email was accepted, or its email has since got an account some other way. One answer for all three, so the response never reveals whether an email is registered. A `COMPLETED` invite still returns 200 with its status.
 
 ---
 
@@ -1234,6 +1234,8 @@ The invited person's first step after opening the emailed link — stages their 
 ```
 **Response 200:** `{ "message": "Verification code sent to your email" }` — no token, no user object, because neither exists yet.
 **400:** `VALIDATION_ERROR` — the password must be 8 to 72 characters and at most 72 UTF-8 bytes (BCrypt refuses to encode more and ignores the excess when matching), and must match `confirmPassword`. The same limits apply when changing a password.
+**404:** `Invite not found or expired`, same as `GET /auth/invites/{token}`.
+**409:** invite already used or awaiting a code.
 
 ---
 
@@ -1257,6 +1259,7 @@ The invited person's first step after opening the emailed link — stages their 
 **400:** code expired, guess cap reached, or invite expired
 **429:** `TOO_MANY_REQUESTS` once the requesting IP has exceeded the invite rate limit. See BR-27.
 **409:** the workspace's `app.max-users` cap has been reached since the invite was created
+**404:** `Invite not found or expired`, same as `GET /auth/invites/{token}`; checked before the guess is counted.
 
 ---
 
@@ -1264,6 +1267,7 @@ The invited person's first step after opening the emailed link — stages their 
 No body. Issues a fresh code; the guess counter is not reset. Rate-limited to one call per 60 seconds per invite (BR-18).
 **Response 200:** `{ "message": "A new code has been sent to your email" }`
 **400:** invite not awaiting a code, invite expired, or still inside the cooldown window
+**404:** `Invite not found or expired`, same as `GET /auth/invites/{token}`.
 
 ---
 
@@ -2040,7 +2044,7 @@ A category with `isInternal = true` (currently just `Opening Balance`, `cat-35`)
 ### BR-18: Invite-Based Onboarding & OTP Security
 Replaces open self-registration entirely (`POST /auth/signup` removed, v1.4.0). A new `User` is created in exactly two ways: `AdminBootstrapRunner` seeds the first `ADMIN` from env vars at startup, using `ADMIN_FIRST_NAME` and `ADMIN_LAST_NAME` for the name that invite emails show as the inviter, "Admin User" if they are blank (solving the chicken-and-egg problem of nobody existing yet to send the first invite), and every subsequent `User` is `MEMBER`, created only through this flow.
 
-**The three-step state machine:** `PENDING` (admin created the invite, email sent) → `AWAITING_OTP` (invited person submitted name/password, code sent) → `COMPLETED` (code verified, `User` created). The `User` row does not exist until the final step — `pendingFirstName`/`pendingLastName`/`pendingPasswordHash` hold the staged details in the interim, cleared the instant they're promoted to a real `User`.
+**The three-step state machine:** `PENDING` (admin created the invite, email sent) → `AWAITING_OTP` (invited person submitted name/password, code sent) → `COMPLETED` (code verified, `User` created; every other invite for the same email is deleted at that moment, together with any staged password hash; if several invites for one email complete at the same moment, exactly one account is created and the rest get the same 404, or the retryable 503 if the database is busy). The `User` row does not exist until the final step — `pendingFirstName`/`pendingLastName`/`pendingPasswordHash` hold the staged details in the interim, cleared the instant they're promoted to a real `User`.
 
 **An email is one identity regardless of case.** Emails are trimmed and stored lowercase (`EmailNormalizer`, `Locale.ROOT` so the result never depends on the server's locale), and every lookup — signin, bootstrap, the invite check — ignores case, so `Alice@x.com` and `alice@x.com` can never be two accounts. Creating an invite for an email that already has a user returns `409`; an expired or unfinished invite does not count, because the `User` row only exists once the OTP is verified, so an admin can always re-invite.
 
