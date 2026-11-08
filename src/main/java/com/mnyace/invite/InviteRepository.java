@@ -11,6 +11,12 @@ import java.util.Optional;
 public interface InviteRepository extends JpaRepository<Invite, String> {
     Optional<Invite> findByToken(String token);
 
+    /** Drops every other invite for this email, so a completed sign-up leaves no usable link (or staged password hash) behind. */
+    @Transactional
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("delete from Invite i where lower(i.email) = lower(:email) and i.id <> :keepId")
+    int deleteOthersForEmail(@Param("email") String email, @Param("keepId") String keepId);
+
     /** Atomically spends one OTP guess; returns 0 once none are left, so parallel requests can't exceed the cap. */
     @Transactional
     @Modifying(flushAutomatically = true, clearAutomatically = true)
