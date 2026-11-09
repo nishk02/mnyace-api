@@ -14,6 +14,7 @@ public record ChangePasswordRequest(
         @NotBlank(message = "Confirm password is required")
         String confirmNewPassword,
 
+        @Size(max = 100, message = "Device label must be at most 100 characters")
         String deviceLabel
 ) {
     /** Keeps the passwords out of logs if the request is ever printed. */

@@ -6,10 +6,15 @@ public record AuthResponse(
         String token,
         @JsonInclude(JsonInclude.Include.NON_NULL)
         String refreshToken,
-        UserSummary user
+        UserSummary user,
+        boolean sessionRestricted
 ) {
+    public AuthResponse(String token, String refreshToken, UserSummary user) {
+        this(token, refreshToken, user, false);
+    }
+
     public AuthResponse withoutRefreshToken() {
-        return new AuthResponse(token, null, user);
+        return new AuthResponse(token, null, user, sessionRestricted);
     }
 
     public record UserSummary(

@@ -39,7 +39,7 @@ public class PasswordService {
 
     /** Changes the password, signs the user out everywhere, and returns a fresh session for the caller. */
     @Transactional
-    public AuthResponse changePassword(String userId, ChangePasswordRequest request) {
+    public AuthResponse changePassword(String userId, ChangePasswordRequest request, ClientInfo client) {
         if (!request.newPassword().equals(request.confirmNewPassword())) {
             throw ApiException.badRequest("Passwords do not match");
         }
@@ -72,7 +72,7 @@ public class PasswordService {
 
         refreshTokenService.revokeAllForUser(userId);
         RefreshTokenIssuer.IssuedRefreshToken session =
-                refreshTokenService.issueNewFamily(user, request.deviceLabel());
+                refreshTokenService.issueNewFamily(user, request.deviceLabel(), client);
         String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole(), session.familyId());
 
         securityEvents.record(SecurityEvent.PASSWORD_CHANGED, userId, null);

@@ -28,7 +28,8 @@ public class RefreshTokenIssuer {
     public record IssuedRefreshToken(User user, String rawToken, LocalDateTime expiresAt, String familyId) {}
 
     @Transactional
-    public IssuedRefreshToken issue(User user, String familyId, String deviceLabel, LocalDateTime sessionStartedAt) {
+    public IssuedRefreshToken issue(
+            User user, String familyId, String deviceLabel, LocalDateTime sessionStartedAt, ClientInfo client) {
         String rawToken = generateRawToken();
         LocalDateTime slidingExpiry = LocalDateTime.now().plusDays(expirationDays);
         LocalDateTime sessionEnd = sessionStartedAt.plusDays(maxSessionDays);
@@ -39,6 +40,8 @@ public class RefreshTokenIssuer {
         token.setTokenHash(hash(rawToken));
         token.setFamilyId(familyId);
         token.setDeviceLabel(deviceLabel);
+        token.setIpAddress(client.ip());
+        token.setUserAgent(client.userAgent());
         token.setSessionStartedAt(sessionStartedAt);
         token.setExpiresAt(expiresAt);
         refreshTokenRepository.save(token);

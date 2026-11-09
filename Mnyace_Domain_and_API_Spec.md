@@ -494,7 +494,9 @@ One row per login/device, not per user — a `User` can hold several active `Ref
 | `userId` | UUID | FK to User |
 | `tokenHash` | String | SHA-256 hex of the raw opaque token, unique, immutable |
 | `familyId` | String | Shared across one rotation chain (one login/device) — see BR-26 |
-| `deviceLabel` | String | Optional, client-supplied at sign-in; `null` if omitted |
+| `deviceLabel` | String | Optional, client-supplied at sign-in, at most 100 characters; `null` if omitted |
+| `ipAddress` | String | Caller IP at sign-in (first `X-Forwarded-For` entry), copied across rotations; `null` if unknown. Display only, never checked — see BR-30 |
+| `userAgent` | String | `User-Agent` at sign-in, capped at 255 characters, copied across rotations; display only |
 | `expiresAt` | LocalDateTime | 30 days from issue, never later than the end of the session (`sessionStartedAt` + 90 days), immutable |
 | `sessionStartedAt` | LocalDateTime | When the original sign-in happened; carried unchanged across every rotation, immutable — see BR-26 |
 | `revokedAt` | LocalDateTime | `null` while active; set on rotation, logout, or reuse-detected cascade — deleted only after the token has long expired, see BR-26 |
@@ -824,6 +826,8 @@ com.mnyace
 │   ├── PasswordService.java          change password: verify, rate-limit, revoke every session, issue a fresh one
 │   ├── SessionController.java        GET /api/sessions (list), DELETE /api/sessions/{id} (one device), DELETE /api/sessions (every device)
 │   ├── SessionService.java           the caller's live sessions, one entry per sign-in
+│   ├── SessionGate.java              which live sessions are active or restricted under the per-user limit, see BR-30
+│   ├── ClientInfo.java               IP and user agent stored on a session
 │   ├── AuthService.java
 │   ├── AdminBootstrapRunner.java     Seeds the first ADMIN (email, password, first and last name) from env vars at startup
 │   ├── RefreshTokenService.java      Thin orchestrator — hash, dispatch to Revoker/Issuer, nothing @Transactional
@@ -1035,9 +1039,11 @@ Self-registration is invite-only — there is no public "create an account" endp
 ```json
 { "email": "nishant@example.com", "password": "SecurePass123!", "deviceLabel": "iPhone 15" }
 ```
-`deviceLabel` is optional — free text, client-supplied, purely cosmetic (a future "active sessions" screen would display it; nothing in rotation or reuse-detection keys off it). Omitted or blank is fine; the `RefreshToken` row is simply created with `deviceLabel = null`.
+`deviceLabel` is optional — free text, at most 100 characters (`400 VALIDATION_ERROR` beyond that), client-supplied, purely cosmetic (a future "active sessions" screen would display it; nothing in rotation or reuse-detection keys off it). Omitted or blank is fine; the `RefreshToken` row is simply created with `deviceLabel = null`.
 
 Request header `X-Client-Platform: web` switches this endpoint (and `/auth/refresh`, `/auth/logout`, `/auth/invites/{token}/verify-otp`) into cookie mode. Absent, or any value other than `web`, is today's unchanged native/body behaviour. See BR-26 for why this split exists and why `web` is the only value that matters.
+
+A correct password always signs in. A user may have at most `session.max-per-user` (2) active sessions; a sign-in beyond that still succeeds but its session is **restricted** until the user signs out of an older one, and the response carries `"sessionRestricted": true` (otherwise `false`). See BR-30.
 
 **Response 200 (native — header absent/non-`web`):** same shape as the invite `verify-otp` response below
 ```json
@@ -1076,7 +1082,7 @@ Set-Cookie: refreshToken=aG3-t-xQC1_TP-TEIBbOkKNu3Gh8ead9JI8X5YmZsgA; Path=/auth
 
 Rotates the presented `refreshToken`: the old one is revoked, a new one is issued in its place (same `familyId`), and a fresh `token` (JWT, 15-minute lifetime) is returned alongside it. See BR-26 for the full rotation and reuse-detection design.
 
-**Response 200:** same shape as `/auth/signin` (native body, or web omitted-body + re-issued `Set-Cookie`, per the same platform header)
+**Response 200:** same shape as `/auth/signin`, with `sessionRestricted` re-evaluated (native body, or web omitted-body + re-issued `Set-Cookie`, per the same platform header)
 **401:** `UNAUTHORIZED`, message "Session expired. Please sign in again." — returned identically whether the token doesn't exist, has expired, was already used once before (reuse detected), or was rotated within the last 5 seconds (a duplicate request). As with `/auth/signin`'s generic `401`, these three causes are deliberately indistinguishable to the caller; see BR-26.
 **429:** `TOO_MANY_REQUESTS` once the requesting IP has exceeded its refresh rate limit. Carries a `Retry-After` header (seconds). See BR-27.
 **503:** `SERVICE_BUSY` if the database was momentarily locked by another writer. Carries `Retry-After: 1`; the request is safe to retry.
@@ -1090,7 +1096,7 @@ Rotates the presented `refreshToken`: the old one is revoked, a new one is issue
 ```
 **Web (`X-Client-Platform: web`):** no body needed — `refreshToken` comes from the cookie. The response additionally clears it (`Max-Age=0`) so a stale cookie can't be replayed after logout.
 
-Revokes every active `RefreshToken` sharing the presented token's `familyId` — i.e. logs out that one device, not every device the user is signed into elsewhere. The JWT of that device stops working at once as well, because its session no longer has a live refresh token; the user's other devices are unaffected.
+Deletes every `RefreshToken` row sharing the presented token's `familyId`, revoked ones included — i.e. logs out that one device, not every device the user is signed into elsewhere. The JWT of that device stops working at once as well, because its session no longer has a live refresh token; the user's other devices are unaffected. Signing out frees a slot under the session limit (BR-30).
 
 **Response 200:** `{ "message": "Logged out successfully" }` — web also carries `Set-Cookie: refreshToken=; Path=/auth; Max-Age=0; HttpOnly; Secure; SameSite=Strict`
 
@@ -1121,15 +1127,15 @@ Sets the new password and signs the user out of every device. It does **not** si
 #### GET /sessions — requires JWT
 Lists the caller's live sessions, most recently active first. A session is one sign-in on one device and stays a single entry across refreshes. Only the caller's own sessions are ever returned.
 
-Each entry: `id` (the session id, the same value as the access token's `sid` claim), `deviceLabel` (what the client sent at sign-in; may be empty), `signedInAt`, `lastActiveAt` (the last refresh) and `current` (true for the session making the request). Both timestamps are UTC instants in ISO-8601 form ending in `Z`, so clients show them in their own timezone.
+Each entry: `id` (the session id, the same value as the access token's `sid` claim), `deviceLabel` (what the client sent at sign-in; may be empty), `signedInAt`, `lastActiveAt` (the last refresh), `ipAddress` and `userAgent` (where it signed in from; either may be null), `current` (true for the session making the request) and `restricted` (true for a session beyond the limit, see BR-30). Both timestamps are UTC instants in ISO-8601 form ending in `Z`, so clients show them in their own timezone.
 
-**Response 200:** `{ "data": [ { "id": "…", "deviceLabel": "iPhone 15", "signedInAt": "2026-11-01T19:11:32Z", "lastActiveAt": "2026-11-01T19:11:32Z", "current": true } ] }`
+**Response 200:** `{ "data": [ { "id": "…", "deviceLabel": "iPhone 15", "signedInAt": "2026-11-01T19:11:32Z", "lastActiveAt": "2026-11-01T19:11:32Z", "ipAddress": "203.0.113.7", "userAgent": "Mozilla/5.0 …", "current": true, "restricted": false } ] }`
 **401:** missing or invalid access token
 
 ---
 
 #### DELETE /sessions/{id} — requires JWT
-Signs the caller out of one of their **other** devices: every live `RefreshToken` of that session is revoked, so the device's access token stops working at once and its refresh token no longer works. `{id}` is the `id` from `GET /sessions`.
+Signs the caller out of one of their **other** devices: every `RefreshToken` row of that session is deleted, so the device's access token stops working at once and its refresh token no longer works. `{id}` is the `id` from `GET /sessions`.
 
 **Response 200:** `{ "message": "Signed out of that device" }`
 **400:** `CURRENT_SESSION` when `{id}` is the session making the request ("Use logout to sign out this device"); signing out the current device is `POST /auth/logout`, and signing out everywhere is `DELETE /sessions`.
@@ -1139,7 +1145,7 @@ Signs the caller out of one of their **other** devices: every live `RefreshToken
 ---
 
 #### DELETE /sessions — requires JWT
-Signs the caller out of **every** device: all of their active `RefreshToken`s are revoked, across every `familyId`. Other users are never affected. It lives under `/api`, not `/auth`, because `/auth/**` is public and this must require a valid login. Web clients (`X-Client-Platform: web`) also get the refresh cookie cleared, as on logout.
+Signs the caller out of **every** device: all of their `RefreshToken` rows are deleted, across every `familyId`. Other users are never affected. It lives under `/api`, not `/auth`, because `/auth/**` is public and this must require a valid login. Web clients (`X-Client-Platform: web`) also get the refresh cookie cleared, as on logout.
 
 The access token already issued stops working at once too, because the API rejects a token whose session has no live refresh token; no new one can be obtained without signing in again.
 
@@ -2184,13 +2190,13 @@ A `RefreshToken` is opaque (32 random bytes, URL-safe base64) and never a JWT �
 
 **A session also has an absolute lifetime.** Sliding expiry alone would let a stolen token on a lost or dormant device stay alive forever, because only the thief ever refreshes it, so nothing clashes and reuse detection never fires. Every token therefore carries `sessionStartedAt`, the time of the original password sign-in, copied unchanged into each rotated token. A token's `expiresAt` is the earlier of 30 days from issue and `sessionStartedAt` + `refresh-token.max-session-days` (90), and rotation additionally refuses any session older than the cap, so lowering the setting applies to sessions that are already running. Past the cap the response is the same generic `401`, and the user signs in with their password again. `DELETE /sessions` ends every session of the caller at once, which is the remedy for a lost device, and a password change does the same while the device that made the change gets a fresh session.
 
-**Revoked tokens are kept until they have expired.** Reuse detection depends on being able to tell "this token never existed" apart from "this token existed but was already used" — deleting a revoked row while it could still be replayed would make the two indistinguishable and silently disable the mechanism. The row stays, with `revokedAt` set, as the record reuse-detection reads from. A daily job (`RefreshTokenCleanupJob`, 03:30 IST, `refresh-token.cleanup.*`) deletes only rows that expired more than 7 days ago: an expired token cannot be used anyway, so removing it loses nothing and a replay still gets the same generic `401`. Revoked-but-unexpired rows are never touched. The job runs inside the app (single instance, idempotent delete, catches up on the next run if one is missed). A future "active sessions" screen could be built from this same table.
+**Revoked tokens are kept for reuse detection, a few per session.** Reuse detection depends on being able to tell "this token never existed" apart from "this token existed but was already used", so a token revoked by rotation stays as a row. Each rotation prunes the session's revoked rows down to the newest `refresh-token.keep-revoked-per-session` (3), so the table holds a handful of rows per session rather than one per refresh. The trade-off: a token replayed after more than that many rotations reads as unknown (the same generic `401`) instead of triggering family revocation. Signing out (logout, sign out of one device or everywhere, a password change or reset) deletes the session's rows outright: with the whole family gone there is nothing left to replay, and a replayed token gets the same generic `401`. A daily job (`RefreshTokenCleanupJob`, 03:30 IST, `refresh-token.cleanup.*`) deletes rows that expired more than 7 days ago; an expired token cannot be used anyway, so removing it loses nothing. The job runs inside the app (single instance, idempotent delete, catches up on the next run if one is missed).
 
 **Why the revoke-then-throw design needed its own transaction boundary, not just its own method:** the naive version — one `@Transactional` method that revokes on reuse-detection and then throws — silently lost the revoke, because Spring's default behaviour rolls back an entire method's writes when it throws an unchecked exception, including writes that happened earlier in the same method. The fix is structural, not cosmetic: `checkAndHandleReuse` (the revoke) and the method that eventually throws (`RefreshTokenService.rotate`) must live far enough apart — a genuinely separate bean (`RefreshTokenRevoker`), called by a method (`rotate`) that carries no `@Transactional` of its own anywhere in its *own* call chain — that the revoke's transaction can commit independently before anything downstream throws. The same reasoning is why `AuthService.refresh()` deliberately carries no `@Transactional`: annotating it would silently fold `RefreshTokenRevoker`'s "independent" transaction back into `refresh()`'s own, since Spring's default propagation joins an already-open transaction rather than starting a new one — reintroducing the exact bug the separate bean was built to avoid, just one call-frame higher.
 
 **`RefreshTokenIssuer.issue()` always resolves the `User` association before returning it**, via `Hibernate.initialize(user)`, rather than relying on something downstream to touch a getter. A lazy `@ManyToOne` proxy only resolves when a field getter is actually called on it — merely passing the reference through a method or a record never triggers that — so without this, `AuthService.refresh()` reading `rotated.user().getEmail()` after `RefreshTokenRevoker`'s transaction had already closed would throw `LazyInitializationException`.
 
-**`/auth/logout` revokes by `familyId`, the same mechanism reuse-detection uses** — `RefreshTokenService.revokeFamilyOf`, not a bulk SQL `UPDATE`. An `@Modifying` JPQL bulk update proved unreliable against this app's SQLite + HikariCP + Hibernate combination in practice — it would report rows affected without the write durably persisting — so every revoke path in this module (rotation's cascade, logout, and the admin-facing `revokeAllForUser`) fetches the affected rows as managed entities and saves them individually instead, the same write path every other entity in this app already relies on.
+**`/auth/logout` deletes by `familyId`** — `RefreshTokenService.revokeFamilyOf`, not a bulk SQL statement. An `@Modifying` JPQL bulk update proved unreliable against this app's SQLite + HikariCP + Hibernate combination in practice — it would report rows affected without the write durably persisting — so every path that ends a session (rotation's cascade, logout, sign out of one device or everywhere, a password change or reset) fetches the affected rows as managed entities and saves or deletes them individually, the same write path every other entity in this app already relies on.
 
 **Lifetimes:** the JWT (`token`) is short-lived (`jwt.expiration-ms`, currently 15 minutes) and names its session in a signed `sid` claim (the refresh-token family). On every request the API checks that the session still has a live refresh token, so logout, sign out everywhere, a password change and reuse detection end an access token at once, not after 15 minutes; a token without a `sid` is rejected. The `RefreshToken` is long-lived (`refresh-token.expiration-days`, currently 30 days, counted from when each token is issued — every rotation issues a fresh one, so a session ends after 30 days without a refresh) and *is* individually revocable, which is the entire point of separating the two: a stolen JWT expires within minutes and dies at once when its session is revoked; a stolen `RefreshToken` is the one that actually needs active revocation. In prod, `ProdSecretsGuard` refuses to start if `jwt.secret` is the public dev default or shorter than 32 bytes, so a missing `JWT_SECRET` can never silently leave tokens signed with a key that is published in the repo.
 
@@ -2255,6 +2261,22 @@ A user who has forgotten their password gets a 6-digit one-time code by email, t
 **Cleanup.** `PasswordResetCleanupJob` runs daily at 03:45 IST and deletes rows older than `password-reset.cleanup.retention-days` (default 2). It must stay at 2 or more, since the daily budget is counted from these rows.
 
 **Out of scope.** Admin-initiated resets and non-email delivery.
+
+---
+
+### BR-30: Session Limit
+
+**At most `session.max-per-user` (2) sessions are active per user; a newer one is restricted, never refused.** A correct password always signs in, so the person is never locked out and the server never has to describe a user's devices to someone who is not signed in. A session is one `familyId`. The user's live sessions (not revoked, not expired) are ordered by `sessionStartedAt`, then by `familyId`; the first 2 are active and any later one is restricted. The sign-in response carries `sessionRestricted`, and `/auth/refresh` re-evaluates it.
+
+**A restricted session can only manage sessions.** `SessionGate` computes the state on every request in `JwtAuthFilter`, the same lookup that already checks the session is live, so enforcement is server-side and does not depend on the client. A restricted session may call `GET /api/sessions`, `DELETE /api/sessions/{id}` and `DELETE /api/sessions`, plus the public `/auth/refresh` and `/auth/logout`; every other authenticated endpoint answers `403 SESSION_LIMIT_REACHED` ("Too many active sessions. Sign out of another device to continue."). Because the state is derived rather than stored, signing out an older session lifts the restriction at once and an expired older session does the same, with no promotion step to get out of sync.
+
+**At most one session waits.** A new sign-in first deletes any session already beyond the limit, so a user holds at most 3 live sessions: 2 active and 1 restricted. Sign-ins of one user queue behind a per-user lock (the app is a single instance) and the session is committed before the next one counts, so simultaneous sign-ins all succeed instead of failing on SQLite's single writer.
+
+**Sessions are not bound to an IP address or a device.** Two browsers on the same phone are two sessions, and a session continues when its IP changes: mobile and Wi-Fi networks change address constantly, and binding to one would sign people out for no security gain. `ipAddress` and `userAgent` are stored when the session starts and shown in `GET /api/sessions` so a user can tell similar devices apart; they are never compared against later requests.
+
+**Signing out deletes the session's rows** (BR-26). The sign-out events (`SIGNOUT_SESSION`, `SIGNOUT_ALL`) are audit-logged as before.
+
+**Known limits.** Anyone with the password can sign in, list the sessions and sign one out, as with any password-only account. A new-device email and a second factor are the usual next controls and are not built.
 
 ---
 

@@ -19,6 +19,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final RefreshTokenService refreshTokenService;
+    private final SessionGate sessionGate;
     private final SecurityEvents securityEvents;
 
     // A dummy BCrypt hash (cost 10) used for unknown emails to keep signin
@@ -26,8 +27,8 @@ public class AuthService {
     private static final String DUMMY_PASSWORD_HASH =
             "$2a$10$6rtN/l7.pj9lD0ad1RxkMuuJY6LLt4b9gGK5RlfyXgSSQYNz91kry";
 
-    @Transactional
-    public AuthResponse signIn(SignInRequest request) {
+    // Not @Transactional: issueNewFamily takes a per-user lock and must commit before releasing it.
+    public AuthResponse signIn(SignInRequest request, ClientInfo client) {
         Optional<User> userOpt = userRepository.findByEmailIgnoreCase(EmailNormalizer.normalize(request.email()));
         boolean passwordMatches = passwordEncoder.matches(
                 request.password(),
@@ -43,10 +44,11 @@ public class AuthService {
         securityEvents.record(SecurityEvent.SIGNIN_SUCCESS, user.getId(), null);
 
         RefreshTokenIssuer.IssuedRefreshToken refreshToken =
-                refreshTokenService.issueNewFamily(user, request.deviceLabel());
+                refreshTokenService.issueNewFamily(user, request.deviceLabel(), client);
         String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole(), refreshToken.familyId());
 
-        return new AuthResponse(accessToken, refreshToken.rawToken(), AuthResponse.UserSummary.from(user));
+        return new AuthResponse(accessToken, refreshToken.rawToken(), AuthResponse.UserSummary.from(user),
+                isRestricted(user, refreshToken.familyId()));
     }
 
     public AuthResponse refresh(String presentedRawToken) {
@@ -58,7 +60,12 @@ public class AuthService {
 
         String accessToken = jwtUtil.generateToken(user.getId(), user.getEmail(), user.getRole(), rotated.familyId());
 
-        return new AuthResponse(accessToken, rotated.rawToken(), AuthResponse.UserSummary.from(user));
+        return new AuthResponse(accessToken, rotated.rawToken(), AuthResponse.UserSummary.from(user),
+                isRestricted(user, rotated.familyId()));
+    }
+
+    private boolean isRestricted(User user, String sessionId) {
+        return sessionGate.stateOf(user.getId(), sessionId) == SessionGate.State.RESTRICTED;
     }
 
     @Transactional

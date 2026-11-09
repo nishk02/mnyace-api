@@ -38,6 +38,12 @@ public class RefreshToken {
     @Column(name = "device_label")
     private String deviceLabel;
 
+    @Column(name = "ip_address", updatable = false)
+    private String ipAddress;
+
+    @Column(name = "user_agent", updatable = false)
+    private String userAgent;
+
     @Column(name = "expires_at", nullable = false, updatable = false)
     private LocalDateTime expiresAt;
 

@@ -24,6 +24,10 @@ public class RefreshTokenRevoker {
     @Value("${refresh-token.max-session-days}")
     private long maxSessionDays;
 
+    // Revoked predecessors kept per session for reuse detection; older ones are pruned on each rotation.
+    @Value("${refresh-token.keep-revoked-per-session}")
+    private int keepRevokedPerSession;
+
     public enum Status { NOT_FOUND, REUSE_DETECTED, DUPLICATE_REQUEST, EXPIRED, VALID }
 
     // A token rotated this recently was most likely sent twice by the same client (double-fired
@@ -74,6 +78,18 @@ public class RefreshTokenRevoker {
         User user = current.getUser();
         Hibernate.initialize(user);
 
-        return refreshTokenIssuer.issue(user, current.getFamilyId(), current.getDeviceLabel(), current.getSessionStartedAt());
+        RefreshTokenIssuer.IssuedRefreshToken issued = refreshTokenIssuer.issue(user, current.getFamilyId(),
+                current.getDeviceLabel(), current.getSessionStartedAt(),
+                new ClientInfo(current.getIpAddress(), current.getUserAgent()));
+        pruneRevoked(current.getFamilyId());
+        return issued;
+    }
+
+    private void pruneRevoked(String familyId) {
+        List<RefreshToken> revoked =
+                refreshTokenRepository.findAllByFamilyIdAndRevokedAtIsNotNullOrderByRevokedAtDesc(familyId);
+        if (revoked.size() > keepRevokedPerSession) {
+            refreshTokenRepository.deleteAll(revoked.subList(keepRevokedPerSession, revoked.size()));
+        }
     }
 }

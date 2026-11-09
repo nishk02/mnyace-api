@@ -46,6 +46,8 @@ public abstract class AuthIntegrationTestBase {
         registry.add("rate-limit.refresh.ip.capacity", () -> "1000");
         registry.add("rate-limit.invite.ip.capacity", () -> "1000");
         registry.add("rate-limit.api.ip.capacity", () -> "100000");
+        // the shared admin signs in many times across a class; tests about the cap lower this
+        registry.add("session.max-per-user", () -> "1000");
     }
 
     /** A unique client IP per call, so tests never share an IP bucket. */

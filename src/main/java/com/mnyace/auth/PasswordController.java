@@ -2,6 +2,7 @@ package com.mnyace.auth;
 
 import com.mnyace.shared.dto.ApiResponse;
 import com.mnyace.shared.security.BaseController;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -21,9 +22,10 @@ public class PasswordController extends BaseController {
     @PutMapping
     public ResponseEntity<ApiResponse<AuthResponse>> changePassword(
             @Valid @RequestBody ChangePasswordRequest request,
-            @RequestHeader(value = "X-Client-Platform", required = false) String platform
+            @RequestHeader(value = "X-Client-Platform", required = false) String platform,
+            HttpServletRequest http
     ) {
-        AuthResponse response = passwordService.changePassword(getCurrentUserId(), request);
+        AuthResponse response = passwordService.changePassword(getCurrentUserId(), request, ClientInfo.from(http));
         return cookieWriter.authResponse(response, platform, "Password changed. Other devices were signed out.");
     }
 }

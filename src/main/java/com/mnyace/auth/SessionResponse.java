@@ -7,6 +7,9 @@ public record SessionResponse(
         String deviceLabel,
         Instant signedInAt,
         Instant lastActiveAt,
-        boolean current
+        String ipAddress,
+        String userAgent,
+        boolean current,
+        boolean restricted
 ) {
 }

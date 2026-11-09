@@ -1,6 +1,7 @@
 package com.mnyace.auth;
 
 import com.mnyace.shared.dto.ApiResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -17,9 +18,10 @@ public class AuthController {
     @PostMapping("/signin")
     public ResponseEntity<ApiResponse<AuthResponse>> signIn(
             @Valid @RequestBody SignInRequest request,
-            @RequestHeader(value = "X-Client-Platform", required = false) String platform
+            @RequestHeader(value = "X-Client-Platform", required = false) String platform,
+            HttpServletRequest http
     ) {
-        AuthResponse response = authService.signIn(request);
+        AuthResponse response = authService.signIn(request, ClientInfo.from(http));
         return cookieWriter.authResponse(response, platform, "Signed in successfully");
     }
 
