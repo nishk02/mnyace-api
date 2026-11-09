@@ -580,6 +580,8 @@ CREATE TABLE refresh_tokens (
     token_hash    TEXT      NOT NULL UNIQUE,
     family_id     TEXT      NOT NULL,
     device_label  TEXT,
+    ip_address    TEXT,
+    user_agent    TEXT,
     expires_at    TIMESTAMP NOT NULL,
     session_started_at TIMESTAMP NOT NULL,
     revoked_at    TIMESTAMP,
