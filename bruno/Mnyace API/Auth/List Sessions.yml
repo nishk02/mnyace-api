@@ -21,7 +21,7 @@ runtime:
 
         // Whether the calling session is past the 2-session limit (also returned by sign-in and refresh).
         const me = sessions.find((s) => s.current);
-        bru.setVar("SESSION_RESTRICTED", me ? String(me.restricted) : "");
+        bru.setEnvVar("SESSION_RESTRICTED", me ? String(me.restricted) : "");
 
 settings:
   encodeUrl: true

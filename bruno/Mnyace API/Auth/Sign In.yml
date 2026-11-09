@@ -31,7 +31,7 @@ runtime:
           if (refreshToken) bru.setEnvVar("REFRESH_TOKEN", refreshToken);
 
           // True when this sign-in is past the 2-session limit: only the session calls work until an older one signs out.
-          bru.setVar("SESSION_RESTRICTED", String(!!res.body.data.sessionRestricted));
+          bru.setEnvVar("SESSION_RESTRICTED", String(!!res.body.data.sessionRestricted));
         }
 
 settings:

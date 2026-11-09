@@ -25,7 +25,7 @@ runtime:
           if (token) bru.setEnvVar("AUTH_TOKEN", token);
           if (refreshToken) bru.setEnvVar("REFRESH_TOKEN", refreshToken);
 
-          bru.setVar("SESSION_RESTRICTED", String(!!res.body.data.sessionRestricted));
+          bru.setEnvVar("SESSION_RESTRICTED", String(!!res.body.data.sessionRestricted));
         }
 
 settings:
