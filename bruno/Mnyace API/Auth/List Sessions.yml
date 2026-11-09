@@ -15,8 +15,13 @@ runtime:
     - type: after-response
       code: |-
         // Kept in memory only (a runtime variable), so it never lands in an environment file.
-        const other = (res.body.data || []).find((s) => !s.current);
+        const sessions = res.body.data || [];
+        const other = sessions.find((s) => !s.current);
         bru.setVar("SESSION_ID", other ? other.id : "");
+
+        // Whether the calling session is past the 2-session limit (also returned by sign-in and refresh).
+        const me = sessions.find((s) => s.current);
+        bru.setEnvVar("SESSION_RESTRICTED", me ? String(me.restricted) : "");
 
 settings:
   encodeUrl: true

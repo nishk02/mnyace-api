@@ -17,6 +17,8 @@ variables:
   - secret: true
     name: REFRESH_TOKEN
   - secret: true
+    name: SESSION_RESTRICTED
+  - secret: true
     name: RESET_CODE
   - secret: true
     name: NEW_PWD

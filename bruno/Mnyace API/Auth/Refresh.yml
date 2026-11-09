@@ -14,6 +14,20 @@ http:
       }
   auth: inherit
 
+runtime:
+  scripts:
+    - type: after-response
+      code: |-
+        // The presented refresh token is spent, so keep the rotated one or the next call reads as reuse.
+        if (res.body.success && res.body.data) {
+          const { token, refreshToken } = res.body.data;
+
+          if (token) bru.setEnvVar("AUTH_TOKEN", token);
+          if (refreshToken) bru.setEnvVar("REFRESH_TOKEN", refreshToken);
+
+          bru.setEnvVar("SESSION_RESTRICTED", String(!!res.body.data.sessionRestricted));
+        }
+
 settings:
   encodeUrl: true
   timeout: 0
