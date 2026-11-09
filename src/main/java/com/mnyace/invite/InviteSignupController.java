@@ -3,6 +3,8 @@ package com.mnyace.invite;
 import com.mnyace.auth.AuthResponse;
 import com.mnyace.auth.RefreshTokenCookieWriter;
 import com.mnyace.shared.dto.ApiResponse;
+import com.mnyace.auth.ClientInfo;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -35,9 +37,10 @@ public class InviteSignupController {
     public ResponseEntity<ApiResponse<AuthResponse>> verifyOtp(
             @PathVariable String token,
             @Valid @RequestBody VerifyOtpRequest request,
-            @RequestHeader(value = "X-Client-Platform", required = false) String platform
+            @RequestHeader(value = "X-Client-Platform", required = false) String platform,
+            HttpServletRequest http
     ) {
-        AuthResponse response = inviteService.verifyOtp(token, request);
+        AuthResponse response = inviteService.verifyOtp(token, request, ClientInfo.from(http));
 
         if (cookieWriter.isWeb(platform)) {
             return ResponseEntity.ok()

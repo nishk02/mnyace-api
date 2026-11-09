@@ -14,5 +14,10 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Stri
     List<RefreshToken> findAllByUser_IdAndRevokedAtIsNullAndExpiresAtAfter(String userId, LocalDateTime now);
     /** True while the session still has a live (not revoked, not expired) token. */
     boolean existsByFamilyIdAndRevokedAtIsNullAndExpiresAtAfter(String familyId, LocalDateTime now);
+    List<RefreshToken> findAllByFamilyId(String familyId);
+    List<RefreshToken> findAllByFamilyIdAndUser_Id(String familyId, String userId);
+    List<RefreshToken> findAllByUser_Id(String userId);
+    /** Revoked rows of one session, newest revocation first - the tail is what rotation prunes. */
+    List<RefreshToken> findAllByFamilyIdAndRevokedAtIsNotNullOrderByRevokedAtDesc(String familyId);
     long deleteByExpiresAtBefore(LocalDateTime cutoff);
 }

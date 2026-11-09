@@ -15,35 +15,41 @@ import java.util.List;
 @RequiredArgsConstructor
 public class SessionService {
     private final RefreshTokenRepository refreshTokenRepository;
+    private final SessionGate sessionGate;
 
     /** The user's live sessions, most recently active first. */
     @Transactional(readOnly = true)
     public List<SessionResponse> listFor(String userId, String currentSessionId) {
-        return refreshTokenRepository.findAllByUser_IdAndRevokedAtIsNullAndExpiresAtAfter(userId, LocalDateTime.now())
-                .stream()
-                .map(token -> new SessionResponse(
-                        token.getFamilyId(),
-                        token.getDeviceLabel(),
-                        toInstant(token.getSessionStartedAt()),
-                        toInstant(token.getCreatedAt()),
-                        token.getFamilyId().equals(currentSessionId)))
+        List<RefreshToken> live = sessionGate.liveSessionsOldestFirst(userId);
+        return java.util.stream.IntStream.range(0, live.size())
+                .mapToObj(i -> {
+                    RefreshToken token = live.get(i);
+                    return new SessionResponse(
+                            token.getFamilyId(),
+                            token.getDeviceLabel(),
+                            toInstant(token.getSessionStartedAt()),
+                            toInstant(token.getCreatedAt()),
+                            token.getIpAddress(),
+                            token.getUserAgent(),
+                            token.getFamilyId().equals(currentSessionId),
+                            i >= sessionGate.maxSessions());
+                })
                 .sorted(Comparator.comparing(SessionResponse::lastActiveAt).reversed())
                 .toList();
     }
 
-    /** Signs out one of the user's other sessions. */
+    /** Signs out one of the user's other sessions, deleting its rows. */
     @Transactional
     public void signOut(String userId, String sessionId, String currentSessionId) {
         if (sessionId.equals(currentSessionId)) {
             throw ApiException.badRequest("CURRENT_SESSION", "Use logout to sign out this device.", null);
         }
-        List<RefreshToken> live = refreshTokenRepository.findAllByFamilyIdAndUser_IdAndRevokedAtIsNull(sessionId, userId);
-        if (live.isEmpty()) {
+        List<RefreshToken> rows = refreshTokenRepository.findAllByFamilyIdAndUser_Id(sessionId, userId);
+        boolean live = rows.stream().anyMatch(token -> token.isActive(LocalDateTime.now()));
+        if (!live) {
             throw ApiException.notFound("Session not found");
         }
-        LocalDateTime now = LocalDateTime.now();
-        live.forEach(token -> token.setRevokedAt(now));
-        refreshTokenRepository.saveAll(live);
+        refreshTokenRepository.deleteAll(rows);
     }
 
     /** Timestamps are stored in server-local time; clients get an unambiguous UTC instant. */

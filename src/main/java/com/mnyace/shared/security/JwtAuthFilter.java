@@ -1,12 +1,16 @@
 package com.mnyace.shared.security;
 
-import com.mnyace.auth.RefreshTokenRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mnyace.auth.SessionGate;
+import com.mnyace.shared.dto.ApiResponse;
 import com.mnyace.auth.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -15,7 +19,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Component
@@ -23,7 +26,8 @@ import java.util.List;
 public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
-    private final RefreshTokenRepository refreshTokenRepository;
+    private final SessionGate sessionGate;
+    private final ObjectMapper objectMapper;
 
     @Override
     protected void doFilterInternal(
@@ -45,7 +49,16 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             String role = jwtUtil.extractRole(token);
             String sessionId = jwtUtil.extractSessionId(token);
 
-            if (userRepository.existsById(userId) && isSessionLive(sessionId)) {
+            SessionGate.State state = userRepository.existsById(userId)
+                    ? sessionGate.stateOf(userId, sessionId)
+                    : SessionGate.State.NOT_LIVE;
+
+            if (state == SessionGate.State.RESTRICTED && !isSessionManagement(request)) {
+                rejectRestricted(response);
+                return;
+            }
+
+            if (state != SessionGate.State.NOT_LIVE) {
                 List<SimpleGrantedAuthority> authorities =
                         List.of(new SimpleGrantedAuthority("ROLE_" + role));
 
@@ -60,8 +73,20 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
-    private boolean isSessionLive(String sessionId) {
-        return sessionId != null
-                && refreshTokenRepository.existsByFamilyIdAndRevokedAtIsNullAndExpiresAtAfter(sessionId, LocalDateTime.now());
+    /** A session past the cap may only list sessions and sign others out, so it can free a slot for itself. */
+    private boolean isSessionManagement(HttpServletRequest request) {
+        String path = request.getRequestURI();
+        boolean listing = "GET".equals(request.getMethod()) && "/api/sessions".equals(path);
+        boolean signingOut = "DELETE".equals(request.getMethod())
+                && ("/api/sessions".equals(path) || path.startsWith("/api/sessions/"));
+        return listing || signingOut;
+    }
+
+    private void rejectRestricted(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpStatus.FORBIDDEN.value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        ApiResponse<?> body = ApiResponse.error("SESSION_LIMIT_REACHED",
+                "Too many active sessions. Sign out of another device to continue.");
+        response.getWriter().write(objectMapper.writeValueAsString(body));
     }
 }

@@ -114,7 +114,7 @@ public class InviteService {
      * Step 2: the invited person submits the 6-digit code from their inbox.
      * On success this is the moment the real User row is finally created.
      */
-    public AuthResponse verifyOtp(String token, VerifyOtpRequest request) {
+    public AuthResponse verifyOtp(String token, VerifyOtpRequest request, ClientInfo client) {
         Invite invite = getInviteOrThrow(token);
         requireStatus(invite, InviteStatus.AWAITING_OTP, "This invite is not awaiting a verification code.");
         requireNotExpired(invite);
@@ -157,7 +157,7 @@ public class InviteService {
         inviteRepository.save(invite);
         inviteRepository.deleteOthersForEmail(invite.getEmail(), invite.getId());
 
-        RefreshTokenIssuer.IssuedRefreshToken refreshToken = refreshTokenService.issueNewFamily(savedUser, request.deviceLabel());
+        RefreshTokenIssuer.IssuedRefreshToken refreshToken = refreshTokenService.issueNewFamily(savedUser, request.deviceLabel(), client);
         String accessToken = jwtUtil.generateToken(savedUser.getId(), savedUser.getEmail(), savedUser.getRole(), refreshToken.familyId());
 
         return new AuthResponse(accessToken, refreshToken.rawToken(), AuthResponse.UserSummary.from(savedUser));
