@@ -42,17 +42,25 @@ public class SessionGate {
                 .toList();
     }
 
+    /** A session's state and its live token; the token is null when the session is not live. */
+    public record Placement(State state, RefreshToken token) {}
+
     @Transactional(readOnly = true)
     public State stateOf(String userId, String sessionId) {
+        return placementOf(userId, sessionId).state();
+    }
+
+    @Transactional(readOnly = true)
+    public Placement placementOf(String userId, String sessionId) {
         if (sessionId == null) {
-            return State.NOT_LIVE;
+            return new Placement(State.NOT_LIVE, null);
         }
         List<RefreshToken> live = liveSessionsOldestFirst(userId);
         for (int i = 0; i < live.size(); i++) {
             if (live.get(i).getFamilyId().equals(sessionId)) {
-                return i < maxSessions ? State.ACTIVE : State.RESTRICTED;
+                return new Placement(i < maxSessions ? State.ACTIVE : State.RESTRICTED, live.get(i));
             }
         }
-        return State.NOT_LIVE;
+        return new Placement(State.NOT_LIVE, null);
     }
 }

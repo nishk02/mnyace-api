@@ -28,7 +28,7 @@ public class SessionService {
                             token.getFamilyId(),
                             token.getDeviceLabel(),
                             toInstant(token.getSessionStartedAt()),
-                            toInstant(token.getCreatedAt()),
+                            toInstant(token.getLastActiveAt()),
                             token.getIpAddress(),
                             token.getUserAgent(),
                             token.getFamilyId().equals(currentSessionId),

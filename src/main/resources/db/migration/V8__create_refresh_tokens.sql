@@ -10,6 +10,7 @@ CREATE TABLE refresh_tokens
     expires_at    TIMESTAMP   NOT NULL,
     session_started_at TIMESTAMP NOT NULL,
     revoked_at    TIMESTAMP,
+    last_active_at  TIMESTAMP   NOT NULL,
     created_at    TIMESTAMP   NOT NULL
 );
 

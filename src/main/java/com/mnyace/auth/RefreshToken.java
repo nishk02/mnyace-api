@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.DynamicUpdate;
 import org.hibernate.annotations.UuidGenerator;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -15,6 +16,7 @@ import java.time.LocalDateTime;
 @Getter
 @Setter
 @NoArgsConstructor
+@DynamicUpdate
 @EntityListeners(AuditingEntityListener.class)
 public class RefreshToken {
     @Id
@@ -53,6 +55,10 @@ public class RefreshToken {
 
     @Column(name = "revoked_at")
     private LocalDateTime revokedAt;
+
+    // Last authenticated request of the session, written at most once per throttle window (SessionActivity).
+    @Column(name = "last_active_at", nullable = false)
+    private LocalDateTime lastActiveAt;
 
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)

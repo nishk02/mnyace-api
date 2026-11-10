@@ -500,6 +500,7 @@ One row per login/device, not per user — a `User` can hold several active `Ref
 | `expiresAt` | LocalDateTime | 30 days from issue, never later than the end of the session (`sessionStartedAt` + 90 days), immutable |
 | `sessionStartedAt` | LocalDateTime | When the original sign-in happened; carried unchanged across every rotation, immutable — see BR-26 |
 | `revokedAt` | LocalDateTime | `null` while active; set on rotation, logout, or reuse-detected cascade — deleted only after the token has long expired, see BR-26 |
+| `lastActiveAt` | LocalDateTime | Last authenticated request made with this session, written at most once per `session.last-active-throttle-seconds` (60) — see BR-30. Set to the issue time on sign-in and on every rotation |
 | `createdAt` | LocalDateTime | |
 
 See BR-26 for the full rotation and reuse-detection rule set.
@@ -585,6 +586,7 @@ CREATE TABLE refresh_tokens (
     expires_at    TIMESTAMP NOT NULL,
     session_started_at TIMESTAMP NOT NULL,
     revoked_at    TIMESTAMP,
+    last_active_at TIMESTAMP NOT NULL,
     created_at    TIMESTAMP NOT NULL
 );
 
@@ -828,6 +830,7 @@ com.mnyace
 │   ├── PasswordService.java          change password: verify, rate-limit, revoke every session, issue a fresh one
 │   ├── SessionController.java        GET /api/sessions (list), DELETE /api/sessions/{id} (one device), DELETE /api/sessions (every device)
 │   ├── SessionService.java           the caller's live sessions, one entry per sign-in
+│   ├── SessionActivity.java          records a session's last activity, throttled, see BR-30
 │   ├── SessionGate.java              which live sessions are active or restricted under the per-user limit, see BR-30
 │   ├── ClientInfo.java               IP and user agent stored on a session
 │   ├── AuthService.java
@@ -1129,7 +1132,7 @@ Sets the new password and signs the user out of every device. It does **not** si
 #### GET /sessions — requires JWT
 Lists the caller's live sessions, most recently active first. A session is one sign-in on one device and stays a single entry across refreshes. Only the caller's own sessions are ever returned.
 
-Each entry: `id` (the session id, the same value as the access token's `sid` claim), `deviceLabel` (what the client sent at sign-in; may be empty), `signedInAt`, `lastActiveAt` (the last refresh), `ipAddress` and `userAgent` (where it signed in from; either may be null), `current` (true for the session making the request) and `restricted` (true for a session beyond the limit, see BR-30). Both timestamps are UTC instants in ISO-8601 form ending in `Z`, so clients show them in their own timezone.
+Each entry: `id` (the session id, the same value as the access token's `sid` claim), `deviceLabel` (what the client sent at sign-in; may be empty), `signedInAt`, `lastActiveAt` (the last authenticated request, accurate to about a minute; see BR-30), `ipAddress` and `userAgent` (where it signed in from; either may be null), `current` (true for the session making the request) and `restricted` (true for a session beyond the limit, see BR-30). Both timestamps are UTC instants in ISO-8601 form ending in `Z`, so clients show them in their own timezone.
 
 **Response 200:** `{ "data": [ { "id": "…", "deviceLabel": "iPhone 15", "signedInAt": "2026-11-01T19:11:32Z", "lastActiveAt": "2026-11-01T19:11:32Z", "ipAddress": "203.0.113.7", "userAgent": "Mozilla/5.0 …", "current": true, "restricted": false } ] }`
 **401:** missing or invalid access token
@@ -2275,6 +2278,8 @@ A user who has forgotten their password gets a 6-digit one-time code by email, t
 **At most one session waits.** A new sign-in first deletes any session already beyond the limit, so a user holds at most 3 live sessions: 2 active and 1 restricted. Sign-ins of one user queue behind a per-user lock (the app is a single instance) and the session is committed before the next one counts, so simultaneous sign-ins all succeed instead of failing on SQLite's single writer.
 
 **Sessions are not bound to an IP address or a device.** Two browsers on the same phone are two sessions, and a session continues when its IP changes: mobile and Wi-Fi networks change address constantly, and binding to one would sign people out for no security gain. `ipAddress` and `userAgent` are stored when the session starts and shown in `GET /api/sessions` so a user can tell similar devices apart; they are never compared against later requests.
+
+**`lastActiveAt` tracks use, not just refreshes.** `JwtAuthFilter` records the time of each authenticated request on the session's live token (`SessionActivity`), for active and restricted sessions alike, and at most once per `session.last-active-throttle-seconds` (60) so a busy client costs one write a minute, not one per call. The write is a single-row update by token id; if SQLite is busy the write is skipped and the request carries on, so a missed heartbeat never fails a call. Sign-in and every rotation start the new token at the current time, so the value is also correct for a session that has not called the API since. `GET /api/sessions` sorts by it.
 
 **Signing out deletes the session's rows** (BR-26). The sign-out events (`SIGNOUT_SESSION`, `SIGNOUT_ALL`) are audit-logged as before.
 
