@@ -1,6 +1,7 @@
 package com.mnyace.shared.security;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mnyace.auth.SessionActivity;
 import com.mnyace.auth.SessionGate;
 import com.mnyace.shared.dto.ApiResponse;
 import com.mnyace.auth.UserRepository;
@@ -27,6 +28,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final JwtUtil jwtUtil;
     private final UserRepository userRepository;
     private final SessionGate sessionGate;
+    private final SessionActivity sessionActivity;
     private final ObjectMapper objectMapper;
 
     @Override
@@ -49,9 +51,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             String role = jwtUtil.extractRole(token);
             String sessionId = jwtUtil.extractSessionId(token);
 
-            SessionGate.State state = userRepository.existsById(userId)
-                    ? sessionGate.stateOf(userId, sessionId)
-                    : SessionGate.State.NOT_LIVE;
+            SessionGate.Placement placement = userRepository.existsById(userId)
+                    ? sessionGate.placementOf(userId, sessionId)
+                    : new SessionGate.Placement(SessionGate.State.NOT_LIVE, null);
+            SessionGate.State state = placement.state();
+
+            if (state != SessionGate.State.NOT_LIVE) {
+                sessionActivity.touch(placement.token());
+            }
 
             if (state == SessionGate.State.RESTRICTED && !isSessionManagement(request)) {
                 rejectRestricted(response);

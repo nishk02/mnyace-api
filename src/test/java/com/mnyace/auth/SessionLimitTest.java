@@ -192,6 +192,61 @@ class SessionLimitTest extends AuthIntegrationTestBase {
         assertThat(response.statusCode()).isEqualTo(400);
     }
 
+    @Test
+    void anAuthenticatedRequest_refreshesLastActive() {
+        String email = newMember();
+        HttpResponse<String> first = signIn(email, "first");
+        ageLastActive(email, "first", 600);
+
+        accounts(first);
+
+        assertThat(lastActiveOf(email, "first")).isAfter(java.time.LocalDateTime.now().minusSeconds(30));
+    }
+
+    @Test
+    void requestsInsideTheThrottleWindow_doNotWrite() {
+        String email = newMember();
+        HttpResponse<String> first = signIn(email, "first");
+        ageLastActive(email, "first", 10);
+        java.time.LocalDateTime before = lastActiveOf(email, "first");
+
+        accounts(first);
+
+        assertThat(lastActiveOf(email, "first")).isEqualTo(before);
+    }
+
+    @Test
+    void everySessionInTheList_keepsItsOwnLastActive_includingTheRestrictedOne() {
+        String email = newMember();
+        HttpResponse<String> first = signIn(email, "first");
+        HttpResponse<String> second = signIn(email, "second");
+        HttpResponse<String> third = signIn(email, "third");
+        for (String label : List.of("first", "second", "third")) {
+            ageLastActive(email, label, 600);
+        }
+
+        accounts(second);
+        accounts(third);
+
+        JsonNode listed = json(sessions(first)).path("data");
+        java.time.Instant recent = java.time.Instant.now().minusSeconds(30);
+        assertThat(java.time.Instant.parse(entry(listed, "first").path("lastActiveAt").asText())).isAfter(recent);
+        assertThat(java.time.Instant.parse(entry(listed, "second").path("lastActiveAt").asText())).isAfter(recent);
+        assertThat(java.time.Instant.parse(entry(listed, "third").path("lastActiveAt").asText())).isAfter(recent);
+    }
+
+    @Test
+    void aRotation_keepsLastActiveCurrent() {
+        String email = newMember();
+        signIn(email, "first");
+        ageLastActive(email, "first", 600);
+        HttpResponse<String> refreshed = post("/auth/refresh",
+                "{\"refreshToken\":\"" + json(signIn(email, "other")).path("data").path("refreshToken").asText() + "\"}");
+
+        assertThat(refreshed.statusCode()).isEqualTo(200);
+        assertThat(lastActiveOf(email, "other")).isAfter(java.time.LocalDateTime.now().minusSeconds(30));
+    }
+
     private String newMember() {
         String email = "limit-" + UUID.randomUUID() + "@test.local";
         User user = new User();
@@ -236,5 +291,20 @@ class SessionLimitTest extends AuthIntegrationTestBase {
     private java.util.List<RefreshToken> rowsFor(String email) {
         String userId = users.findByEmailIgnoreCase(email).orElseThrow().getId();
         return refreshTokens.findAllByUser_Id(userId);
+    }
+
+    private void ageLastActive(String email, String label, long secondsAgo) {
+        for (RefreshToken row : rowsFor(email)) {
+            if (label.equals(row.getDeviceLabel()) && row.getRevokedAt() == null) {
+                row.setLastActiveAt(java.time.LocalDateTime.now().minusSeconds(secondsAgo));
+                refreshTokens.save(row);
+            }
+        }
+    }
+
+    private java.time.LocalDateTime lastActiveOf(String email, String label) {
+        return rowsFor(email).stream()
+                .filter(row -> label.equals(row.getDeviceLabel()) && row.getRevokedAt() == null)
+                .findFirst().orElseThrow().getLastActiveAt();
     }
 }

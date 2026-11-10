@@ -43,6 +43,7 @@ public class RefreshTokenIssuer {
         token.setIpAddress(client.ip());
         token.setUserAgent(client.userAgent());
         token.setSessionStartedAt(sessionStartedAt);
+        token.setLastActiveAt(LocalDateTime.now());
         token.setExpiresAt(expiresAt);
         refreshTokenRepository.save(token);
 
