@@ -71,6 +71,12 @@ public abstract class AuthIntegrationTestBase {
         return send(HttpRequest.newBuilder(uri(path)).DELETE(), headers);
     }
 
+    protected HttpResponse<String> deleteWithBody(String path, String body, String... headers) {
+        return send(HttpRequest.newBuilder(uri(path))
+                .header("Content-Type", "application/json")
+                .method("DELETE", HttpRequest.BodyPublishers.ofString(body)), headers);
+    }
+
     protected HttpResponse<String> get(String path, String... headers) {
         return send(HttpRequest.newBuilder(uri(path)).GET(), headers);
     }

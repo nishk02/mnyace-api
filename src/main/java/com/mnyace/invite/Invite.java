@@ -50,6 +50,15 @@ public class Invite {
     @Column(name = "pending_password_hash")
     private String pendingPasswordHash;
 
+    @Column(name = "pending_consent_version")
+    private String pendingConsentVersion;
+
+    @Column(name = "pending_consent_at")
+    private LocalDateTime pendingConsentAt;
+
+    @Column(name = "pending_adult_confirmed")
+    private Boolean pendingAdultConfirmed;
+
     @Column(name = "otp_code_hash")
     private String otpCodeHash;
 

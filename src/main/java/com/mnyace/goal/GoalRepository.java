@@ -9,6 +9,7 @@ import java.util.Optional;
 @Repository
 public interface GoalRepository extends JpaRepository<Goal, String> {
     List<Goal> findByUserIdAndActiveTrueOrderByDisplayOrderAsc(String userId);
+    List<Goal> findByUserId(String userId);
 
     Optional<Goal> findByIdAndUserId(String id, String userId);
 

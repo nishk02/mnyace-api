@@ -186,6 +186,9 @@ Derived from: Sign Up screen (page 4)
 | `email` | String | Unique, used for login |
 | `passwordHash` | String | BCrypt hashed, never stored plain |
 | `onboardingStep` | Integer | 0=not started, 1=accounts done, 2=planned done, 3=complete |
+| `consentVersion` | String | Version of the Privacy Policy and Terms accepted at sign-up (for example `2026-12-11`); `null` when the client did not send one — see BR-31 |
+| `consentAcceptedAt` | LocalDateTime | Server time the consent was submitted; `null` when none was recorded |
+| `adultConfirmed` | Boolean | The person confirmed they are 18 or over; `null` when not sent |
 | `createdAt` | LocalDateTime | |
 | `updatedAt` | LocalDateTime | |
 
@@ -469,6 +472,7 @@ An `Invite` is a short-lived state machine, not a permanent record like the enti
 | `pendingFirstName` | String | Staged, not on a real `User` until OTP verifies |
 | `pendingLastName` | String | Staged, not on a real `User` until OTP verifies |
 | `pendingPasswordHash` | String | Staged, BCrypt hashed; cleared once the `User` is created |
+| `pendingConsentVersion`, `pendingConsentAt`, `pendingAdultConfirmed` | String, LocalDateTime, Boolean | The consent staged at sign-up, copied onto the `User` when it is created and then cleared — see BR-31 |
 | `otpCodeHash` | String | BCrypt hashed 6-digit code; cleared once the `User` is created |
 | `otpExpiresAt` | LocalDateTime | 10 minutes from issue |
 | `otpAttempts` | Integer | Guesses spent over the invite's whole lifetime — not reset by a resend; capped at 10, after which a new invite is required |
@@ -495,7 +499,7 @@ One row per login/device, not per user — a `User` can hold several active `Ref
 | `tokenHash` | String | SHA-256 hex of the raw opaque token, unique, immutable |
 | `familyId` | String | Shared across one rotation chain (one login/device) — see BR-26 |
 | `deviceLabel` | String | Optional, client-supplied at sign-in, at most 100 characters; `null` if omitted |
-| `ipAddress` | String | Caller IP at sign-in (first `X-Forwarded-For` entry), copied across rotations; `null` if unknown. Display only, never checked — see BR-30 |
+| `ipAddress` | String | Network of the caller at sign-in, not the exact address: the first three bytes of an IPv4 address (`203.0.113.0`) or the first six of an IPv6 one, from the first `X-Forwarded-For` entry; copied across rotations; `null` if unknown. Display only, never checked — see BR-30 |
 | `userAgent` | String | `User-Agent` at sign-in, capped at 255 characters, copied across rotations; display only |
 | `expiresAt` | LocalDateTime | 30 days from issue, never later than the end of the session (`sessionStartedAt` + 90 days), immutable |
 | `sessionStartedAt` | LocalDateTime | When the original sign-in happened; carried unchanged across every rotation, immutable — see BR-26 |
@@ -547,6 +551,9 @@ CREATE TABLE users (
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'MEMBER',
     onboarding_step INTEGER NOT NULL DEFAULT 0,
+    consent_version TEXT,
+    consent_accepted_at TIMESTAMP,
+    adult_confirmed BOOLEAN,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -565,6 +572,9 @@ CREATE TABLE invites (
     pending_first_name     TEXT,
     pending_last_name      TEXT,
     pending_password_hash  TEXT,
+    pending_consent_version TEXT,
+    pending_consent_at     TIMESTAMP,
+    pending_adult_confirmed BOOLEAN,
     otp_code_hash          TEXT,
     otp_expires_at         TIMESTAMP,
     otp_attempts           INTEGER   NOT NULL DEFAULT 0,
@@ -827,6 +837,8 @@ com.mnyace
 ├── auth/
 │   ├── AuthController.java           signin, refresh, logout — see invite/ for onboarding
 │   ├── PasswordController.java       PUT /api/users/me/password
+│   ├── AccountDeletionController.java DELETE /api/users/me
+│   ├── AccountDeletionService.java   verify the password, then delete the user and everything held under them, see BR-31
 │   ├── PasswordService.java          change password: verify, rate-limit, revoke every session, issue a fresh one
 │   ├── SessionController.java        GET /api/sessions (list), DELETE /api/sessions/{id} (one device), DELETE /api/sessions (every device)
 │   ├── SessionService.java           the caller's live sessions, one entry per sign-in
@@ -959,7 +971,7 @@ com.mnyace
     ├── health/
     │   └── HealthController.java     GET /api/health — public readiness check (touches the database)
     ├── email/
-    │   └── EmailService.java         Invite + OTP emails (Brevo SMTP)
+    │   └── EmailService.java         Invite, sign-up code and reset code emails (Brevo SMTP); Reply-To and the "Need help?" line use `app.support-email`
     ├── exception/
     │   ├── GlobalExceptionHandler.java
     │   ├── ApiException.java         +details field (v1.5.0); +badRequest(code, message, details) overload (v1.5.0)
@@ -1174,6 +1186,20 @@ On success every refresh token of the user is revoked, so all other devices are 
 
 ---
 
+#### DELETE /users/me — requires JWT
+```json
+{ "password": "CurrentPassword123!" }
+```
+Permanently deletes the caller and everything held under them (BR-31). The current password is required again, so a stolen access token cannot delete the account.
+
+**Response 200:** `{ "message": "Your account and data have been deleted" }`. Every session ends with it: the access token stops working at once, and web clients (`X-Client-Platform: web`) also get the refresh cookie cleared. The client should treat it as a sign-out.
+**400:** `INVALID_CURRENT_PASSWORD` (a `400`, not a `401`, for the same reason as the password change) or a missing `password`.
+**401:** missing or invalid access token.
+**409:** `ADMIN_ACCOUNT_PROTECTED` — an `ADMIN` account cannot be deleted here.
+**429:** `TOO_MANY_REQUESTS`, sharing the password-change limit of 5 attempts per user in 15 minutes (BR-27).
+
+---
+
 ### Health
 
 #### GET /health — public
@@ -1240,11 +1266,14 @@ The invited person's first step after opening the emailed link — stages their 
   "firstName": "Nishant",
   "lastName": "Kumar",
   "password": "SecurePass123!",
-  "confirmPassword": "SecurePass123!"
+  "confirmPassword": "SecurePass123!",
+  "consentVersion": "2026-12-11",
+  "adultConfirmed": true
 }
 ```
+`consentVersion` (at most 50 characters of letters, digits, `.`, `_`, `-`) and `adultConfirmed` are optional for now; the client sends them once the sign-up consent checkbox is on, and they become required after that (BR-31). `adultConfirmed: false` is refused.
 **Response 200:** `{ "message": "Verification code sent to your email" }` — no token, no user object, because neither exists yet.
-**400:** `VALIDATION_ERROR` — the password must be 8 to 72 characters and at most 72 UTF-8 bytes (BCrypt refuses to encode more and ignores the excess when matching), and must match `confirmPassword`. The same limits apply when changing a password.
+**400:** `VALIDATION_ERROR` — the password must be 8 to 72 characters and at most 72 UTF-8 bytes (BCrypt refuses to encode more and ignores the excess when matching), and must match `confirmPassword`. The same limits apply when changing a password. Also `400` when `adultConfirmed` is `false` or `consentVersion` is malformed.
 **404:** `Invite not found or expired`, same as `GET /auth/invites/{token}`.
 **409:** invite already used or awaiting a code.
 
@@ -2239,7 +2268,7 @@ Both endpoints are `permitAll` by necessity — there's no JWT yet to gate them 
 
 Security-relevant actions leave an audit trail separate from ordinary application logs, so "was this account attacked yesterday?" can be answered from a log, not from memory.
 
-**One JSON line per event, using Elastic Common Schema field names**, so dashboards and alert rules in common log tools read it without translation: `@timestamp` (UTC), `event.category` / `event.action` / `event.outcome` (`success` or `failure`) / `event.reason`, `user.id`, `source.ip`, `user_agent.original` (capped at 200 characters), `http.request.id`, `service.name`, `service.environment`, and a small `labels` object for related ids. The events live in one catalogue (`SecurityEvent`): sign-in success and failure (`reason` `unknown_user` or `wrong_password`), `signout_all`, `signout_session` (with the session family), `rate_limited` (`reason` is the bucket that tripped: `signin_ip`, `signin_email`, `refresh_ip`, `invite_ip`, `api_ip`, `password_change_user`), `refresh_token_reuse` (with the session family), `password_change` success and failure, `password_reset_request` (existing accounts only), `password_reset` success and failure (`reason` `unknown_user`, `no_open_code`, `expired`, `attempts_exhausted`, `wrong_code` or `already_used`; never the code), `otp_lockout` (reason `password_reset_max_attempts` for a reset code), and `invite_create`. The `rate_limited` reasons also include `forgot_password_ip`, `forgot_password_ip_daily`, `reset_password_ip`, `reset_password_email`, `forgot_password_email_daily`, `mail_budget_daily` and `health_ip`.
+**One JSON line per event, using Elastic Common Schema field names**, so dashboards and alert rules in common log tools read it without translation: `@timestamp` (UTC), `event.category` / `event.action` / `event.outcome` (`success` or `failure`) / `event.reason`, `user.id`, `source.ip`, `user_agent.original` (capped at 200 characters), `http.request.id`, `service.name`, `service.environment`, and a small `labels` object for related ids. The events live in one catalogue (`SecurityEvent`): sign-in success and failure (`reason` `unknown_user` or `wrong_password`), `signout_all`, `signout_session` (with the session family), `rate_limited` (`reason` is the bucket that tripped: `signin_ip`, `signin_email`, `refresh_ip`, `invite_ip`, `api_ip`, `password_change_user`), `refresh_token_reuse` (with the session family), `password_change` success and failure, `password_reset_request` (existing accounts only), `password_reset` success and failure (`reason` `unknown_user`, `no_open_code`, `expired`, `attempts_exhausted`, `wrong_code` or `already_used`; never the code), `otp_lockout` (reason `password_reset_max_attempts` for a reset code), `invite_create` and `account_delete` (the id of the deleted user stays in the log line, which is why the log outlives the account, see BR-31). The `rate_limited` reasons also include `account_delete_user`, `forgot_password_ip`, `forgot_password_ip_daily`, `reset_password_ip`, `reset_password_email`, `forgot_password_email_daily`, `mail_budget_daily` and `health_ip`.
 
 **What is never logged:** passwords, access or refresh tokens, OTP codes, invite tokens, and email addresses. People are identified by `user.id` only, a random UUID that is not derived from anything personal and is not a credential: knowing it grants no access, because every request is authorized from the access token and per-record ownership is enforced. The id and the IP address are still personal data (pseudonymous), so the log is treated as such: short retention and restricted access.
 
@@ -2277,13 +2306,26 @@ A user who has forgotten their password gets a 6-digit one-time code by email, t
 
 **At most one session waits.** A new sign-in first deletes any session already beyond the limit, so a user holds at most 3 live sessions: 2 active and 1 restricted. Sign-ins of one user queue behind a per-user lock (the app is a single instance) and the session is committed before the next one counts, so simultaneous sign-ins all succeed instead of failing on SQLite's single writer.
 
-**Sessions are not bound to an IP address or a device.** Two browsers on the same phone are two sessions, and a session continues when its IP changes: mobile and Wi-Fi networks change address constantly, and binding to one would sign people out for no security gain. `ipAddress` and `userAgent` are stored when the session starts and shown in `GET /api/sessions` so a user can tell similar devices apart; they are never compared against later requests.
+**Sessions are not bound to an IP address or a device.** Two browsers on the same phone are two sessions, and a session continues when its IP changes: mobile and Wi-Fi networks change address constantly, and binding to one would sign people out for no security gain. `ipAddress` (truncated to its network, so the stored value is no longer a full address) and `userAgent` are stored when the session starts and shown in `GET /api/sessions` so a user can tell similar devices apart; they are never compared against later requests.
 
 **`lastActiveAt` tracks use, not just refreshes.** `JwtAuthFilter` records the time of each authenticated request on the session's live token (`SessionActivity`), for active and restricted sessions alike, and at most once per `session.last-active-throttle-seconds` (60) so a busy client costs one write a minute, not one per call. The write is a single-row update by token id; if SQLite is busy the write is skipped and the request carries on, so a missed heartbeat never fails a call. Sign-in and every rotation start the new token at the current time, so the value is also correct for a session that has not called the API since. `GET /api/sessions` sorts by it.
 
 **Signing out deletes the session's rows** (BR-26). The sign-out events (`SIGNOUT_SESSION`, `SIGNOUT_ALL`) are audit-logged as before.
 
 **Known limits.** Anyone with the password can sign in, list the sessions and sign one out, as with any password-only account. A new-device email and a second factor are the usual next controls and are not built.
+
+---
+
+### BR-31: Consent Record & Account Deletion
+
+**Consent is recorded at sign-up.** `POST /auth/invites/{token}/signup` may carry `consentVersion` (which Privacy Policy and Terms the person accepted) and `adultConfirmed` (they are 18 or over). The server stamps them with its own time and stages them on the invite; `verify-otp` copies all three values onto the `User` (`consentVersion`, `consentAcceptedAt`, `adultConfirmed`) and clears them from the invite. They are optional until the frontend's consent checkbox is live, then become required; accounts created before that hold `null`. A client sending `adultConfirmed: false` is refused.
+
+**Account deletion is a hard delete.** `DELETE /api/users/me` (password required) removes, in one transaction: the goal allocations of the user's transactions, their transactions, goals and accounts, every refresh token (so every session ends), password reset rows, and every invite row held under their email (matched case-insensitively), then the `User` row. Nothing is anonymised or kept. There is no month or year summary table to clear, because those figures are computed on read. The foreign keys do not cascade (only an allocation's link to its transaction does), so `AccountDeletionService` clears each table in foreign-key order and writes each step out before the next. `AccountDeletionTest` seeds one of every kind of data, deletes, then scans every table for a `user_id`, `invited_by`, `email` or `transaction_id` that still points at the user, so a table added later that is not cleared fails the test.
+
+**An admin cannot delete themselves here** (`409`): invites reference the admin who sent them, so deleting one would orphan or erase other people's invites. Removing an admin is a manual step.
+
+**What deletion does not reach.** Backups (Litestream copies in the Backblaze bucket) and the security event log (Axiom) are separate stores that age out on their own retention; a deleted user's id and IP can remain in log lines until then. The privacy policy has to say so, with the periods.
+
 
 ---
 

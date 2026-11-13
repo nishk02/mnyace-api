@@ -16,11 +16,11 @@ class EmailTemplatesTest {
             "ACCEPT_URL", "https://example.com/signup?token=abc_123-XYZ",
             "INVITED_BY_NAME", "Sarah Johnson",
             "INVITED_BY_EMAIL", "sarah@example.com",
-            "RECIPIENT_EMAIL", "friend@example.com");
+            "SUPPORT_EMAIL", "help@example.com", "RECIPIENT_EMAIL", "friend@example.com");
     private static final Map<String, String> SIGNUP_CODE = Map.of(
-            "ASSETS_URL", "https://cdn.example.com/email", "CODE", "482913", "EXPIRES_IN", "10 minutes", "RECIPIENT_EMAIL", "friend@example.com");
+            "ASSETS_URL", "https://cdn.example.com/email", "CODE", "482913", "EXPIRES_IN", "10 minutes", "SUPPORT_EMAIL", "help@example.com", "RECIPIENT_EMAIL", "friend@example.com");
     private static final Map<String, String> RESET_CODE = Map.of(
-            "ASSETS_URL", "https://cdn.example.com/email", "CODE", "482913", "EXPIRES_IN", "15 minutes", "RECIPIENT_EMAIL", "friend@example.com");
+            "ASSETS_URL", "https://cdn.example.com/email", "CODE", "482913", "EXPIRES_IN", "15 minutes", "SUPPORT_EMAIL", "help@example.com", "RECIPIENT_EMAIL", "friend@example.com");
 
     @Test
     void everyTemplateRendersWithNoPlaceholderLeft() {
@@ -39,7 +39,7 @@ class EmailTemplatesTest {
                 "ASSETS_URL", "https://cdn.example.com/email",
                 "INVITED_BY_NAME", "<script>alert(1)</script>",
                 "INVITED_BY_EMAIL", "a\"onmouseover=\"x@example.com",
-                "RECIPIENT_EMAIL", "friend@example.com");
+                "SUPPORT_EMAIL", "help@example.com", "RECIPIENT_EMAIL", "friend@example.com");
 
         String html = EmailTemplates.render("invite", hostile);
 
@@ -49,7 +49,7 @@ class EmailTemplatesTest {
 
     @Test
     void aMissingValue_orAnUnusedOne_isAnError() {
-        assertThatThrownBy(() -> EmailTemplates.render("signup-code", Map.of("ASSETS_URL", "x", "CODE", "1")))
+        assertThatThrownBy(() -> EmailTemplates.render("signup-code", Map.of("ASSETS_URL", "x", "CODE", "1", "SUPPORT_EMAIL", "x")))
                 .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("EXPIRES_IN");
         Map<String, String> extra = new java.util.HashMap<>(SIGNUP_CODE);
         extra.put("TYPO", "x");

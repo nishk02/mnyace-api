@@ -93,11 +93,25 @@ public class InviteService {
         invite.setPendingFirstName(request.firstName());
         invite.setPendingLastName(request.lastName());
         invite.setPendingPasswordHash(passwordEncoder.encode(request.password()));
+        recordConsent(invite, request);
 
         issueNewOtp(invite);
         invite.setStatus(InviteStatus.AWAITING_OTP);
 
         inviteRepository.save(invite);
+    }
+
+    /** Consent is optional for now; when the client sends it, it is stamped with the server time and held until the account exists. */
+    private void recordConsent(Invite invite, InviteSignupRequest request) {
+        if (Boolean.FALSE.equals(request.adultConfirmed())) {
+            throw ApiException.badRequest("You must be 18 or over to sign up");
+        }
+        String version = request.consentVersion() == null || request.consentVersion().isBlank()
+                ? null : request.consentVersion();
+        boolean sent = version != null || request.adultConfirmed() != null;
+        invite.setPendingConsentVersion(version);
+        invite.setPendingAdultConfirmed(request.adultConfirmed());
+        invite.setPendingConsentAt(sent ? LocalDateTime.now() : null);
     }
 
     public InviteResponse getInviteInfo(String token) {
@@ -147,6 +161,9 @@ public class InviteService {
         user.setEmail(EmailNormalizer.normalize(invite.getEmail()));
         user.setPasswordHash(invite.getPendingPasswordHash());
         user.setRole("MEMBER");
+        user.setConsentVersion(invite.getPendingConsentVersion());
+        user.setConsentAcceptedAt(invite.getPendingConsentAt());
+        user.setAdultConfirmed(invite.getPendingAdultConfirmed());
         User savedUser = saveNewMember(user);
 
         // Clear staged secrets now that they've done their job - no reason a
@@ -154,6 +171,9 @@ public class InviteService {
         invite.setStatus(InviteStatus.COMPLETED);
         invite.setPendingPasswordHash(null);
         invite.setOtpCodeHash(null);
+        invite.setPendingConsentVersion(null);
+        invite.setPendingConsentAt(null);
+        invite.setPendingAdultConfirmed(null);
         inviteRepository.save(invite);
         inviteRepository.deleteOthersForEmail(invite.getEmail(), invite.getId());
 

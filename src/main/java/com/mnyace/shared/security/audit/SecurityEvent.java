@@ -16,7 +16,8 @@ public enum SecurityEvent {
     PASSWORD_RESET(Category.IAM, "password_reset", Outcome.SUCCESS),
     PASSWORD_RESET_FAILED(Category.IAM, "password_reset", Outcome.FAILURE),
     OTP_LOCKOUT(Category.IAM, "otp_lockout", Outcome.FAILURE),
-    INVITE_CREATED(Category.IAM, "invite_create", Outcome.SUCCESS);
+    INVITE_CREATED(Category.IAM, "invite_create", Outcome.SUCCESS),
+    ACCOUNT_DELETED(Category.IAM, "account_delete", Outcome.SUCCESS);
 
     public enum Category { AUTHENTICATION, IAM, INTRUSION_DETECTION }
 

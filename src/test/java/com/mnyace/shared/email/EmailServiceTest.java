@@ -30,6 +30,7 @@ class EmailServiceTest {
         ReflectionTestUtils.setField(emailService, "inviteSignupUrl", "https://example.com/signup");
         ReflectionTestUtils.setField(emailService, "assetsUrl", "https://cdn.example.com/email");
         ReflectionTestUtils.setField(emailService, "fromAddress", "MnyAce Team <no-reply@example.com>");
+        ReflectionTestUtils.setField(emailService, "supportEmail", "help@example.com");
     }
 
     @Test
@@ -40,11 +41,12 @@ class EmailServiceTest {
         assertThat(sent.getSubject()).isEqualTo("You're invited to MnyAce");
         assertThat(sent.getAllRecipients()[0].toString()).isEqualTo("friend@example.com");
         assertThat(sent.getFrom()[0].toString()).contains("no-reply@example.com");
+        assertThat(sent.getReplyTo()[0].toString()).isEqualTo("help@example.com");
         String text = part(sent, "text/plain");
         String html = part(sent, "text/html");
         assertThat(text).contains("Sarah Johnson").contains("https://example.com/signup?token=tok-1")
-                .contains("What is MnyAce?").contains("automated email");
-        assertThat(html).contains("invited you to MnyAce.").doesNotContain("someone").contains("automated email").doesNotContain("Contact Sarah").contains("Sarah Johnson").contains("sarah@example.com").contains("Create your account")
+                .contains("What is MnyAce?").contains("Need help? Write to help@example.com");
+        assertThat(html).contains("invited you to MnyAce.").doesNotContain("someone").contains("mailto:help@example.com").doesNotContain("Contact Sarah").contains("Sarah Johnson").contains("sarah@example.com").contains("Create your account")
                 .contains("https://cdn.example.com/email/logo-v1.png").contains("https://cdn.example.com/email/icon-cash-v1.png")
                 .contains("https://cdn.example.com/email/icon-piggy-bank-v1.png")
                 .contains("What is MnyAce?").contains("Track your finances").contains("Define realistic goals")
@@ -56,8 +58,8 @@ class EmailServiceTest {
     void theCodeEmails_carryTheCodeInBothParts() throws Exception {
         emailService.sendOtpEmail("friend@example.com", "482913");
         MimeMessage otp = sent();
-        assertThat(part(otp, "text/plain")).contains("482913").contains("10 minutes");
-        assertThat(part(otp, "text/html")).contains("482913").contains("10 minutes").contains("automated email");
+        assertThat(part(otp, "text/plain")).contains("482913").contains("10 minutes").contains("Need help? Write to help@example.com");
+        assertThat(part(otp, "text/html")).contains("482913").contains("10 minutes").contains("mailto:help@example.com");
 
         emailService.sendPasswordResetEmail("friend@example.com", "135790");
         ArgumentCaptor<MimeMessage> captor = ArgumentCaptor.forClass(MimeMessage.class);
@@ -65,7 +67,7 @@ class EmailServiceTest {
         MimeMessage reset = saved(captor.getAllValues().get(1));
         assertThat(reset.getSubject()).isEqualTo("Your MnyAce password reset code");
         assertThat(part(reset, "text/plain")).contains("135790").contains("15 minutes");
-        assertThat(part(reset, "text/html")).contains("135790").contains("15 minutes").contains("automated email");
+        assertThat(part(reset, "text/html")).contains("135790").contains("15 minutes").contains("mailto:help@example.com");
     }
 
     private MimeMessage sent() {
