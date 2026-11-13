@@ -4,6 +4,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -25,7 +26,10 @@ public interface TransactionRepository extends JpaRepository<Transaction, String
             String userId, String financialYear, int month, Pageable pageable);
 
     Optional<Transaction> findByIdAndUserId(String id, String userId);
-    List<Transaction> findByUserId(String userId);
+    /** Account deletion: one statement, not one per row. Native, so it needs no entity loading. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = "DELETE FROM transactions WHERE user_id = :userId", nativeQuery = true)
+    int deleteAllByUser(@Param("userId") String userId);
 
     List<Transaction> findByUserIdAndAccountIdOrderByDateDescCreatedAtDesc(
             String userId, String accountId);

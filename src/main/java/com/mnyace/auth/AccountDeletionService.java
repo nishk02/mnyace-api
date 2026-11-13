@@ -1,15 +1,12 @@
 package com.mnyace.auth;
 
-import com.mnyace.account.Account;
 import com.mnyace.account.AccountRepository;
-import com.mnyace.goal.Goal;
 import com.mnyace.goal.GoalRepository;
 import com.mnyace.invite.InviteRepository;
 import com.mnyace.shared.exception.ApiException;
 import com.mnyace.shared.security.audit.SecurityEvent;
 import com.mnyace.shared.security.audit.SecurityEvents;
 import com.mnyace.shared.security.ratelimit.RateLimiterService;
-import com.mnyace.transaction.Transaction;
 import com.mnyace.transaction.TransactionGoalAllocationRepository;
 import com.mnyace.transaction.TransactionRepository;
 import jakarta.persistence.EntityManager;
@@ -19,13 +16,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
-
 /** Hard-deletes a user and everything held under them; the foreign keys have no cascade, so each table is cleared in turn. */
 @Service
 public class AccountDeletionService {
-    private static final int CHUNK = 500;
-
     private final UserRepository userRepository;
     private final AccountRepository accountRepository;
     private final GoalRepository goalRepository;
@@ -89,23 +82,11 @@ public class AccountDeletionService {
                     "An admin account cannot be deleted here.");
         }
 
-        List<Transaction> transactions = transactionRepository.findByUserId(userId);
-        List<String> transactionIds = transactions.stream().map(Transaction::getId).toList();
-        for (int from = 0; from < transactionIds.size(); from += CHUNK) {
-            List<String> chunk = transactionIds.subList(from, Math.min(from + CHUNK, transactionIds.size()));
-            allocationRepository.deleteAll(allocationRepository.findByTransactionIdIn(chunk));
-        }
-        flushAndClear();
-
-        transactionRepository.deleteAll(transactions);
-        flushAndClear();
-
-        List<Goal> goals = goalRepository.findByUserId(userId);
-        goalRepository.deleteAll(goals);
-        flushAndClear();
-
-        List<Account> accounts = accountRepository.findByUserId(userId);
-        accountRepository.deleteAll(accounts);
+        // Bulk statements: a long history would otherwise be loaded and deleted one row at a time.
+        allocationRepository.deleteAllByUser(userId);
+        transactionRepository.deleteAllByUser(userId);
+        goalRepository.deleteAllByUser(userId);
+        accountRepository.deleteAllByUser(userId);
         flushAndClear();
 
         refreshTokenRepository.deleteAll(refreshTokenRepository.findAllByUser_Id(userId));
