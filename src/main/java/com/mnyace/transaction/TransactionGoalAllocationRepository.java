@@ -1,6 +1,7 @@
 package com.mnyace.transaction;
 
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -12,6 +13,12 @@ import java.util.List;
 @Repository
 public interface TransactionGoalAllocationRepository extends JpaRepository<TransactionGoalAllocation, String> {
     List<TransactionGoalAllocation> findByTransactionId(String transactionId);
+
+    /** Account deletion: one statement, not one per row. Native, so it needs no entity loading. */
+    @Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query(value = "DELETE FROM transaction_goal_allocations WHERE transaction_id IN "
+            + "(SELECT id FROM transactions WHERE user_id = :userId)", nativeQuery = true)
+    int deleteAllByUser(@Param("userId") String userId);
     List<TransactionGoalAllocation> findByTransactionIdIn(List<String> transactionIds);
 
     @Query("SELECT COALESCE(SUM(a.amount), 0) FROM TransactionGoalAllocation a " +
