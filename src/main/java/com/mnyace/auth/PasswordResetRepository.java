@@ -8,12 +8,14 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
 public interface PasswordResetRepository extends JpaRepository<PasswordReset, String> {
     /** Every row is one email sent, so these counts are the daily mail budget. */
     long countByCreatedAtGreaterThanEqual(LocalDateTime since);
+    List<PasswordReset> findAllByUser_Id(String userId);
 
     long countByUser_IdAndCreatedAtGreaterThanEqual(String userId, LocalDateTime since);
 

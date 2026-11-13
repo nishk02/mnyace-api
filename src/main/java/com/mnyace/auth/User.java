@@ -41,6 +41,16 @@ public class User {
     @Column(name = "onboarding_step", nullable = false)
     private int onboardingStep = 0;
 
+    // Which Privacy Policy and Terms version the user accepted at sign-up, when, and the 18+ confirmation; null when never recorded.
+    @Column(name = "consent_version")
+    private String consentVersion;
+
+    @Column(name = "consent_accepted_at")
+    private LocalDateTime consentAcceptedAt;
+
+    @Column(name = "adult_confirmed")
+    private Boolean adultConfirmed;
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

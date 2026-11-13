@@ -179,7 +179,7 @@ class SessionLimitTest extends AuthIntegrationTestBase {
 
         JsonNode session = entry(json(sessions(response)).path("data"), "phone");
 
-        assertThat(session.path("ipAddress").asText()).isEqualTo(ip);
+        assertThat(session.path("ipAddress").asText()).isEqualTo(ip.substring(0, ip.lastIndexOf('.')) + ".0");
         assertThat(session.path("userAgent").asText()).isEqualTo("TestAgent/1.0");
     }
 

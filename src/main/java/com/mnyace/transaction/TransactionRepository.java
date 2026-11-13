@@ -25,6 +25,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, String
             String userId, String financialYear, int month, Pageable pageable);
 
     Optional<Transaction> findByIdAndUserId(String id, String userId);
+    List<Transaction> findByUserId(String userId);
 
     List<Transaction> findByUserIdAndAccountIdOrderByDateDescCreatedAtDesc(
             String userId, String accountId);

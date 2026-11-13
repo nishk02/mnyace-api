@@ -9,6 +9,7 @@ import java.util.Optional;
 @Repository
 public interface AccountRepository extends JpaRepository<Account, String> {
     List<Account> findByUserIdAndActiveTrue(String userId);
+    List<Account> findByUserId(String userId);
 
     Optional<Account> findByIdAndUserId(String id, String userId);
 

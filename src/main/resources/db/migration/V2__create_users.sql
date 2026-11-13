@@ -7,6 +7,9 @@ CREATE TABLE users
     password_hash   TEXT        NOT NULL,
     role            TEXT        NOT NULL DEFAULT 'MEMBER',
     onboarding_step INTEGER     NOT NULL DEFAULT 0,
+    consent_version     TEXT,
+    consent_accepted_at TIMESTAMP,
+    adult_confirmed     BOOLEAN,
     created_at      TIMESTAMP   NOT NULL,
     updated_at      TIMESTAMP   NOT NULL
 );

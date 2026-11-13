@@ -25,6 +25,9 @@ public class EmailService {
     @Value("${app.email-assets-url}")
     private String assetsUrl;
 
+    @Value("${app.support-email}")
+    private String supportEmail;
+
     public void sendInviteEmail(String toEmail, String token, String invitedByName, String invitedByEmail) {
         String link = inviteSignupUrl + "?token=" + token;
 
@@ -42,13 +45,14 @@ public class EmailService {
                 Savings is a Habit. Keeping track is the Key.
 
                 If you weren't expecting this, you can ignore this email.
-                This is an automated email, so please don't reply to it.
-                """.formatted(invitedByName, invitedByEmail, link);
+                Need help? Write to %4$s
+                """.formatted(invitedByName, invitedByEmail, link, supportEmail);
         String html = EmailTemplates.render("invite", Map.of(
                 "ASSETS_URL", assetsUrl,
                 "ACCEPT_URL", link,
                 "INVITED_BY_NAME", invitedByName,
                 "INVITED_BY_EMAIL", invitedByEmail,
+                "SUPPORT_EMAIL", supportEmail,
                 "RECIPIENT_EMAIL", toEmail));
 
         send(toEmail, "You're invited to MnyAce", text, html);
@@ -58,15 +62,16 @@ public class EmailService {
         String text = """
                 Your MnyAce verification code is:
 
-                %s
+                %1$s
 
                 This code expires in 10 minutes. If you didn't request this, you can ignore this email.
-                This is an automated email, so please don't reply to it.
-                """.formatted(code);
+                Need help? Write to %2$s
+                """.formatted(code, supportEmail);
         String html = EmailTemplates.render("signup-code", Map.of(
                 "ASSETS_URL", assetsUrl,
                 "CODE", code,
                 "EXPIRES_IN", "10 minutes",
+                "SUPPORT_EMAIL", supportEmail,
                 "RECIPIENT_EMAIL", toEmail));
 
         send(toEmail, "Your MnyAce verification code", text, html);
@@ -76,26 +81,28 @@ public class EmailService {
         String text = """
                 Your MnyAce password reset code is:
 
-                %s
+                %1$s
 
                 This code expires in 15 minutes. If you didn't request this, you can ignore this email; your password has not changed.
-                This is an automated email, so please don't reply to it.
-                """.formatted(code);
+                Need help? Write to %2$s
+                """.formatted(code, supportEmail);
         String html = EmailTemplates.render("password-reset-code", Map.of(
                 "ASSETS_URL", assetsUrl,
                 "CODE", code,
                 "EXPIRES_IN", "15 minutes",
+                "SUPPORT_EMAIL", supportEmail,
                 "RECIPIENT_EMAIL", toEmail));
 
         send(toEmail, "Your MnyAce password reset code", text, html);
     }
 
-    /** Sends plain text and HTML together, so mail apps that cannot show HTML still get the text. */
+    /** Sends plain text and HTML together, so mail apps that cannot show HTML still get the text. Replies go to the support mailbox. */
     private void send(String toEmail, String subject, String text, String html) {
         try {
             MimeMessage message = mailSender.createMimeMessage();
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(fromAddress);
+            helper.setReplyTo(supportEmail);
             helper.setTo(toEmail);
             helper.setSubject(subject);
             helper.setText(text, html);

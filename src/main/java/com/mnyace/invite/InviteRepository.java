@@ -6,10 +6,12 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface InviteRepository extends JpaRepository<Invite, String> {
     Optional<Invite> findByToken(String token);
+    List<Invite> findAllByEmailIgnoreCase(String email);
 
     /** Drops every other invite for this email, so a completed sign-up leaves no usable link (or staged password hash) behind. */
     @Transactional

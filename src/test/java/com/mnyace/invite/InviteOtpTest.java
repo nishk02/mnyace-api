@@ -33,6 +33,9 @@ class InviteOtpTest extends AuthIntegrationTestBase {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private InviteRepository inviteRepository;
+
     @Test
     void fullFlow_createsAMemberWhoCanSignIn() {
         String email = uniqueEmail();
@@ -46,6 +49,46 @@ class InviteOtpTest extends AuthIntegrationTestBase {
         assertThat(accessTokenOf(verified)).isNotBlank();
 
         assertThat(signIn(email, PASSWORD, "X-Forwarded-For", freshIp()).statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void consent_isCarriedFromTheInviteOntoTheNewUser() {
+        String email = uniqueEmail();
+        String inviteToken = createInvite(email);
+        assertThat(submitSignup(inviteToken, ",\"consentVersion\":\"2026-12-11\",\"adultConfirmed\":true").statusCode())
+                .isEqualTo(200);
+
+        assertThat(verifyOtp(inviteToken, lastOtpFor(email)).statusCode()).isEqualTo(200);
+
+        User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
+        assertThat(user.getConsentVersion()).isEqualTo("2026-12-11");
+        assertThat(user.getAdultConfirmed()).isTrue();
+        assertThat(user.getConsentAcceptedAt()).isNotNull().isAfter(java.time.LocalDateTime.now().minusMinutes(5));
+        Invite invite = inviteRepository.findByToken(inviteToken).orElseThrow();
+        assertThat(invite.getPendingConsentVersion()).isNull();
+        assertThat(invite.getPendingConsentAt()).isNull();
+    }
+
+    @Test
+    void consent_isOptionalForNow() {
+        String email = uniqueEmail();
+        String inviteToken = createInvite(email);
+        submitSignup(inviteToken);
+        verifyOtp(inviteToken, lastOtpFor(email));
+
+        User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
+        assertThat(user.getConsentVersion()).isNull();
+        assertThat(user.getConsentAcceptedAt()).isNull();
+        assertThat(user.getAdultConfirmed()).isNull();
+    }
+
+    @Test
+    void consent_refusesAnAgeConfirmationOfFalseAndABadVersion() {
+        String inviteToken = createInvite(uniqueEmail());
+
+        assertThat(submitSignup(inviteToken, ",\"consentVersion\":\"2026-12-11\",\"adultConfirmed\":false").statusCode())
+                .isEqualTo(400);
+        assertThat(submitSignup(inviteToken, ",\"consentVersion\":\"<script>\"").statusCode()).isEqualTo(400);
     }
 
     @Test
@@ -201,9 +244,14 @@ class InviteOtpTest extends AuthIntegrationTestBase {
     }
 
     private HttpResponse<String> submitSignup(String inviteToken) {
+        return submitSignup(inviteToken, "");
+    }
+
+    /** {@code extraJson} is appended inside the request object, e.g. {@code ,"adultConfirmed":true}. */
+    private HttpResponse<String> submitSignup(String inviteToken, String extraJson) {
         return post("/auth/invites/" + inviteToken + "/signup",
                 "{\"firstName\":\"Test\",\"lastName\":\"Member\",\"password\":\"" + PASSWORD
-                        + "\",\"confirmPassword\":\"" + PASSWORD + "\"}",
+                        + "\",\"confirmPassword\":\"" + PASSWORD + "\"" + extraJson + "}",
                 "X-Forwarded-For", freshIp());
     }
 
