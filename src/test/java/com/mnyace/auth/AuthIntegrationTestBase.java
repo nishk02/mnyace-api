@@ -52,7 +52,8 @@ public abstract class AuthIntegrationTestBase {
 
     /** A unique client IP per call, so tests never share an IP bucket. */
     protected static String freshIp() {
-        return "10.9.0." + NEXT_IP.getAndIncrement();
+        int next = NEXT_IP.getAndIncrement();
+        return "10.9." + next / 250 + "." + (next % 250 + 1);
     }
 
     protected HttpResponse<String> post(String path, String body, String... headers) {

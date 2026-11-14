@@ -25,5 +25,8 @@ class ClientInfoTest {
         assertThat(ClientInfo.truncate(null)).isNull();
         assertThat(ClientInfo.truncate("unknown")).isNull();
         assertThat(ClientInfo.truncate("evil.example.com")).isNull();
+        assertThat(ClientInfo.truncate("cafe.babe")).isNull();
+        assertThat(ClientInfo.truncate("10.9.0.256")).isNull();
+        assertThat(ClientInfo.truncate("1.2.3")).isNull();
     }
 }

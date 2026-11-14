@@ -21,7 +21,20 @@ public record ClientInfo(String ip, String userAgent) {
 
     /** Keeps the network, not the host: the first three bytes of an IPv4 address (/24) or the first six of an IPv6 one (/48). */
     static String truncate(String ip) {
-        if (ip == null || !ip.matches("[0-9a-fA-F:.]+")) {
+        if (ip == null) {
+            return null;
+        }
+        if (ip.matches("[0-9]{1,3}(\\.[0-9]{1,3}){3}")) {
+            String[] octets = ip.split("\\.");
+            for (String octet : octets) {
+                if (Integer.parseInt(octet) > 255) {
+                    return null;
+                }
+            }
+            return Integer.parseInt(octets[0]) + "." + Integer.parseInt(octets[1]) + "." + Integer.parseInt(octets[2]) + ".0";
+        }
+        // Only an IPv6 literal gets here: anything else would make getByName resolve a name over DNS.
+        if (!ip.contains(":") || !ip.matches("[0-9a-fA-F:.]+")) {
             return null;
         }
         try {
