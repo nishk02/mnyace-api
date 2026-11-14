@@ -216,7 +216,7 @@ Derived from: Add Account screen (page 38), Accounts list (page 39), Excel Accou
 | `id` | UUID | Primary key |
 | `userId` | UUID | FK to User |
 | `name` | String | e.g. "MAXIS Bank", "India Bank" |
-| `type` | Enum | `CASH`, `BANK`, `WALLET` |
+| `type` | Enum | `CASH`, `BANK`, `WALLET`. Users create only `BANK` and `WALLET` accounts; the one `CASH` account is seeded (BR-32) |
 | `currentBalance` | BigDecimal | Source of truth — updated with every transaction |
 | `currency` | String | Default `INR` |
 | `colorLabel` | String | Hex colour code for UI display |
@@ -228,7 +228,7 @@ Derived from: Add Account screen (page 38), Accounts list (page 39), Excel Accou
 **Key design decision:** `currentBalance` is kept in sync in real-time as transactions are posted. It is never recomputed from history. This makes balance reads instant regardless of how many transactions exist.
 
 **Type revision (post v1.1.0):** Original draft listed `CASH, SAVINGS, CURRENT, WALLET` — four values mixing two unrelated classification axes (where money sits, vs. bank account sub-type). Revised to three values, each answering a question a user actually recognises:
-- `CASH` — physical cash, no bank involved
+- `CASH` — physical cash, no bank involved. Not user-created: every user gets exactly one account of this type, named `Cash`, opening at ₹0 (BR-32)
 - `BANK` — any bank account, savings or current. The Savings/Current distinction is informational only (the app's logic never behaves differently between them — both just hold a balance), so it lives in the account `name` (e.g. "MAXIS Bank Savings") rather than as a separate enforced type.
 - `WALLET` — digital prepaid wallet balance (Paytm, PhonePe, Amazon Pay). Distinct from UPI, which is a payment rail moving money between bank accounts, not a balance-holding account type — a UPI payment still debits a `BANK` account.
 
@@ -1317,12 +1317,13 @@ No body. Issues a fresh code; the guess counter is not reset. Rate-limited to on
 ```json
 {
   "name": "MAXIS Bank",
-  "type": "CASH",
+  "type": "BANK",
   "currentBalance": 35000.00,
   "currency": "INR",
   "colorLabel": "#E8A04D"
 }
 ```
+`type` must be `BANK` or `WALLET`: `CASH` returns `400` (`Type must be BANK or WALLET; every user already has a Cash account`), and the name `Cash` is already taken (`409`).  
 **Response 201:** Full account object  
 **Side effect:** If `currentBalance > 0`, auto-creates a `SETTLEMENT/Adjustment` transaction. This produces the "Current Balance / Adjustment" entries visible in the Figma Cash Flow list.  
 **Side effect:** Increments `user.onboardingStep` to 1 if currently 0.
@@ -1338,7 +1339,7 @@ Useful for filtering account dropdowns in various UI contexts (e.g. show only BA
 {
   "data": {
     "accounts": [
-      { "id": "uuid", "name": "MAXIS Bank", "type": "CASH", "currentBalance": 35000.00, "colorLabel": "#E8A04D", "goalLinked": false },
+      { "id": "uuid", "name": "Cash", "type": "CASH", "currentBalance": 1250.00, "colorLabel": null, "goalLinked": false },
       { "id": "uuid", "name": "India Bank", "type": "BANK", "currentBalance": 3457.55, "colorLabel": "#4A90D9", "goalLinked": true }
     ],
     "totalBalance": 38457.55
@@ -1352,6 +1353,8 @@ Useful for filtering account dropdowns in various UI contexts (e.g. show only BA
 
 #### PUT /accounts/{id} — name, type, colorLabel, currentBalance (triggers BR-02's auto `SETTLEMENT/Adjustment`).
 
+The seeded Cash account is edited here like any other: setting `currentBalance` records what cash the user holds today. Its `type` can't change, and no other account can become `CASH` (`400`).
+
 **Downward correction on a goal-linked account (v1.5.0 — see BR-20):**
 ```json
 {
@@ -1364,7 +1367,7 @@ Useful for filtering account dropdowns in various UI contexts (e.g. show only BA
 ```
 `goalAllocations` is optional and only meaningful when the new `currentBalance` would drop below the account's total earmarked goal progress — omitted otherwise. If it's needed and omitted, `400` with the same structured `details` payload shown in §6's response envelope. Amounts must sum to *exactly* the shortfall (not just cover it), each must be strictly positive, and a `goalId` can't repeat within the list — all three are rejected with `400`. Supplying it when it isn't actually needed doesn't error; the update still succeeds, with an `info` message in the response (not `warning` — see §6) explaining that the selection wasn't used. See BR-20 for the full guard.
 
-#### DELETE /accounts/{id} — soft delete. Reject if account has transactions.
+#### DELETE /accounts/{id} — soft delete. Reject if account has transactions. The Cash account can't be deleted (`400`).
 
 ---
 
@@ -1719,7 +1722,7 @@ Single endpoint — assembles everything the Home screen needs in one call.
       "savingsMessage": "You can save ₹22,500 today!"
     },
     "accounts": [
-      { "id": "uuid", "name": "MAXIS Bank", "currentBalance": 35000.00, "type": "CASH", "colorLabel": "#E8A04D" },
+      { "id": "uuid", "name": "Cash", "currentBalance": 1250.00, "type": "CASH", "colorLabel": null },
       { "id": "uuid", "name": "India Bank", "currentBalance": 3457.55, "type": "BANK", "colorLabel": "#4A90D9" }
     ],
     "lastEntries": [
@@ -2326,6 +2329,15 @@ A user who has forgotten their password gets a 6-digit one-time code by email, t
 
 **What deletion does not reach.** Backups (Litestream copies in the Backblaze bucket) and the security event log (Axiom) are separate stores that age out on their own retention; a deleted user's id and IP can remain in log lines until then. The privacy policy has to say so, with the periods.
 
+
+
+### BR-32: Seeded Cash Account
+
+**Every user has exactly one Cash account.** Cash is not something users create: `POST /accounts` refuses `type: CASH`, and the name `Cash` is taken. The account is created with the user: at `verify-otp` for invited members (the user, their Cash account and the invite's completion commit in one transaction, so a failure leaves the invite open for a retry of the same code), at startup for the bootstrapped admin and test member. It is named `Cash`, has type `CASH`, and opens at ₹0 with no opening-balance entry.
+
+**The user sets what they hold.** The balance is edited through `PUT /accounts/{id}` like any account, so a change records a `SETTLEMENT/Adjustment` (BR-02) and the usual goal-earmark guard applies. The account's name and colour can be edited. Its type can't change, no other account can become `CASH`, and it can't be deleted.
+
+**Everything else treats it as an ordinary account.** It counts in the accounts total and the dashboard balance, takes income, expense and transfers, and can back a goal (BR-12).
 
 ---
 

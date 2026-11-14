@@ -14,7 +14,7 @@ public record CreateAccountRequest(
         String name,
 
         @NotBlank(message = "Account type is required")
-        @Pattern(regexp = "CASH|BANK|WALLET", message = "Type must be CASH, BANK, or WALLET")
+        @Pattern(regexp = "BANK|WALLET", message = "Type must be BANK or WALLET; every user already has a Cash account")
         String type,
 
         @DecimalMin(value = "0.0", message = "Opening balance cannot be negative")

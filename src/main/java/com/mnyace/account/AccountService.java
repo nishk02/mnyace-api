@@ -66,6 +66,16 @@ public class AccountService {
         return AccountResponse.from(savedAccount, false);
     }
 
+    /** Gives a new user their one Cash account, opening at zero. */
+    @Transactional
+    public void createCashAccount(User user) {
+        Account account = new Account();
+        account.setUser(user);
+        account.setName(Account.CASH_NAME);
+        account.setType(Account.CASH_TYPE);
+        accountRepository.save(account);
+    }
+
     public AccountResponse getAccount(String userId, String accountId) {
         Account account = accountRepository.findByIdAndUserId(accountId, userId)
                 .orElseThrow(() -> ApiException.notFound("Account not found"));
@@ -92,6 +102,10 @@ public class AccountService {
         }
 
         if (request.type() != null) {
+            if (!request.type().equals(account.getType())
+                    && (Account.CASH_TYPE.equals(request.type()) || Account.CASH_TYPE.equals(account.getType()))) {
+                throw ApiException.badRequest("The Cash account's type can't be changed, and no other account can become Cash.");
+            }
             account.setType(request.type());
         }
 
@@ -176,6 +190,10 @@ public class AccountService {
     public void deleteAccount(String userId, String accountId) {
         Account account = accountRepository.findByIdAndUserId(accountId, userId)
                 .orElseThrow(() -> ApiException.notFound("Account not found"));
+
+        if (Account.CASH_TYPE.equals(account.getType())) {
+            throw ApiException.badRequest("The Cash account can't be deleted.");
+        }
 
         account.setActive(false);
         accountRepository.save(account);
