@@ -1,5 +1,6 @@
 package com.mnyace.auth;
 
+import com.mnyace.account.AccountService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -15,6 +16,7 @@ import static org.mockito.Mockito.when;
 
 class AdminBootstrapRunnerTest {
     private UserRepository users;
+    private AccountService accounts;
     private AdminBootstrapRunner runner;
 
     @BeforeEach
@@ -22,7 +24,9 @@ class AdminBootstrapRunnerTest {
         users = mock(UserRepository.class);
         PasswordEncoder encoder = mock(PasswordEncoder.class);
         when(encoder.encode(any())).thenReturn("hash");
-        runner = new AdminBootstrapRunner(users, encoder);
+        accounts = mock(AccountService.class);
+        when(users.save(any(User.class))).thenAnswer(call -> call.getArgument(0));
+        runner = new AdminBootstrapRunner(users, encoder, accounts);
         ReflectionTestUtils.setField(runner, "adminEmail", "Admin@Test.Local");
         ReflectionTestUtils.setField(runner, "adminPassword", "AdminPass123!");
     }
@@ -39,6 +43,14 @@ class AdminBootstrapRunnerTest {
         assertThat(saved.getLastName()).isEqualTo("Kumar");
         assertThat(saved.getEmail()).isEqualTo("admin@test.local");
         assertThat(saved.getRole()).isEqualTo("ADMIN");
+    }
+
+    @Test
+    void theAdmin_getsTheirCashAccount() {
+        runner.run();
+
+        User admin = saved();
+        verify(accounts).createCashAccount(admin);
     }
 
     @Test

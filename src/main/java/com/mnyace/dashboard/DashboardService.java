@@ -190,6 +190,11 @@ public class DashboardService {
             return "🎯 You are all set! Just hold on to it 💰";
         }
 
+        // Nothing to save from yet (zero, under a rupee, or overdrawn) - "every ₹0 counts" reads wrong.
+        if (totalBalance.compareTo(BigDecimal.ONE) < 0) {
+            return "Add money to your accounts to start saving towards your goal!";
+        }
+
         // Balance is less than what's needed — encourage partial saving
         if (totalBalance.compareTo(remaining) < 0) {
             return "Save what you can — every ₹"

@@ -171,7 +171,12 @@ public class TransactionService {
 
         guardWithdrawalAllocation(account, request.type(), request.toGoalId(), request.amount(), request.goalAllocations());
 
+        BigDecimal balanceBefore = account.getCurrentBalance();
+        BigDecimal toBalanceBefore = toAccount != null ? toAccount.getCurrentBalance() : null;
+
         applyBalanceEffect(transaction, account, toAccount, request.amount());
+        requireCashNotOverdrawn(account, balanceBefore);
+        requireCashNotOverdrawn(toAccount, toBalanceBefore);
 
         accountRepository.save(account);
         if (toAccount != null) accountRepository.save(toAccount);
@@ -210,6 +215,9 @@ public class TransactionService {
         Account toAccount = transaction.getToAccount();
 
         List<GoalAllocationItem> existingAllocations = goalAllocationService.getExistingAllocations(transaction);
+
+        BigDecimal balanceBefore = account.getCurrentBalance();
+        BigDecimal toBalanceBefore = toAccount != null ? toAccount.getCurrentBalance() : null;
 
         reverseBalanceEffect(transaction, account, toAccount);
         reverseGoalProgress(transaction);
@@ -257,6 +265,8 @@ public class TransactionService {
         }
 
         applyBalanceEffect(transaction, account, toAccount, transaction.getAmount());
+        requireCashNotOverdrawn(account, balanceBefore);
+        requireCashNotOverdrawn(toAccount, toBalanceBefore);
 
         accountRepository.save(account);
         if (toAccount != null) accountRepository.save(toAccount);
@@ -306,7 +316,12 @@ public class TransactionService {
                 ? goalAllocationService.requireResultingBalanceSafeForDeletion(toAccount, toAccountResultingBalance, confirm)
                 : null;
 
+        BigDecimal balanceBefore = account.getCurrentBalance();
+        BigDecimal toBalanceBefore = toAccount != null ? toAccount.getCurrentBalance() : null;
+
         reverseBalanceEffect(transaction, account, toAccount);
+        requireCashNotOverdrawn(account, balanceBefore);
+        requireCashNotOverdrawn(toAccount, toBalanceBefore);
 
         accountRepository.save(account);
         if (toAccount != null) accountRepository.save(toAccount);
@@ -447,6 +462,18 @@ public class TransactionService {
                             toAccount.getCurrentBalance().add(amount));
                 }
             }
+        }
+    }
+
+    /** Cash holds only what the user has, so an entry may not push it below zero; a bank or wallet may overdraw. */
+    private void requireCashNotOverdrawn(Account account, BigDecimal balanceBefore) {
+        if (account == null || !Account.CASH_TYPE.equals(account.getType())) {
+            return;
+        }
+        BigDecimal after = account.getCurrentBalance();
+        if (after.signum() < 0 && after.compareTo(balanceBefore) < 0) {
+            throw ApiException.badRequest("This would take your Cash balance below ₹0, by ₹"
+                    + formatAmount(after.negate()) + ". Update your cash balance first.");
         }
     }
 

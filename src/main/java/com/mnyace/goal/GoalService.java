@@ -72,6 +72,8 @@ public class GoalService {
         Account account = accountRepository.findByIdAndUserId(request.accountId(), userId)
                 .orElseThrow(() -> ApiException.notFound("Account not found"));
 
+        requireNotOverdrawn(account);
+
         if (goalRepository.existsByUserIdAndNameIgnoreCase(userId, request.name())) {
             throw ApiException.conflict("A goal named '" + request.name() + "' already exists");
         }
@@ -156,6 +158,7 @@ public class GoalService {
             if (!account.isActive()) {
                 throw ApiException.badRequest("Destination account is inactive.");
             }
+            requireNotOverdrawn(account);
         }
 
         // startDate is immutable (it anchors the frozen "planned" pace). endDate can move
@@ -297,5 +300,12 @@ public class GoalService {
 
     private static boolean isUpcoming(Goal goal) {
         return goal.getStartDate() != null && goal.getStartDate().isAfter(AppClock.today());
+    }
+
+    /** A goal's savings must sit in real money, so its account can't be overdrawn. */
+    private void requireNotOverdrawn(Account account) {
+        if (account.getCurrentBalance().signum() < 0) {
+            throw ApiException.badRequest("This account's balance is below ₹0. Bring it to ₹0 or more before linking a goal.");
+        }
     }
 }

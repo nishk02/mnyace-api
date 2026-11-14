@@ -126,7 +126,7 @@ class AccountDeletionTest extends AuthIntegrationTestBase {
         String bank = idOf(post("/api/accounts",
                 "{\"name\":\"bank\",\"type\":\"BANK\",\"currentBalance\":1000}", "Authorization", auth));
         String cash = idOf(post("/api/accounts",
-                "{\"name\":\"cash\",\"type\":\"CASH\",\"currentBalance\":50}", "Authorization", auth));
+                "{\"name\":\"wallet\",\"type\":\"WALLET\",\"currentBalance\":50}", "Authorization", auth));
         String goal = idOf(post("/api/goals",
                 "{\"name\":\"goal\",\"targetAmount\":5000,\"accountId\":\"" + bank + "\",\"startDate\":\"" + today
                         + "\",\"endDate\":\"" + today.plusYears(1) + "\"}", "Authorization", auth));

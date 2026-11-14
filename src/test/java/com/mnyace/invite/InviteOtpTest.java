@@ -1,5 +1,7 @@
 package com.mnyace.invite;
 
+import com.mnyace.account.AccountRepository;
+import com.mnyace.account.AccountService;
 import com.mnyace.auth.AuthIntegrationTestBase;
 import com.mnyace.shared.email.EmailService;
 import com.mnyace.auth.User;
@@ -8,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
@@ -21,7 +24,9 @@ import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 
 class InviteOtpTest extends AuthIntegrationTestBase {
@@ -36,6 +41,12 @@ class InviteOtpTest extends AuthIntegrationTestBase {
     @Autowired
     private InviteRepository inviteRepository;
 
+    @Autowired
+    private AccountRepository accountRepository;
+
+    @MockitoSpyBean
+    private AccountService accountService;
+
     @Test
     void fullFlow_createsAMemberWhoCanSignIn() {
         String email = uniqueEmail();
@@ -49,6 +60,43 @@ class InviteOtpTest extends AuthIntegrationTestBase {
         assertThat(accessTokenOf(verified)).isNotBlank();
 
         assertThat(signIn(email, PASSWORD, "X-Forwarded-For", freshIp()).statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void aNewMember_getsTheirCashAccount() {
+        String email = uniqueEmail();
+        String inviteToken = createInvite(email);
+        submitSignup(inviteToken);
+
+        verifyOtp(inviteToken, lastOtpFor(email));
+
+        User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
+        assertThat(accountRepository.findByUserIdAndActiveTrue(user.getId()))
+                .singleElement()
+                .satisfies(account -> {
+                    assertThat(account.getName()).isEqualTo("Cash");
+                    assertThat(account.getType()).isEqualTo("CASH");
+                    assertThat(account.getCurrentBalance()).isEqualByComparingTo("0");
+                });
+    }
+
+    @Test
+    void aFailedCashAccount_rollsTheSignupBack_andTheSameCodeCanBeRetried() {
+        String email = uniqueEmail();
+        String inviteToken = createInvite(email);
+        submitSignup(inviteToken);
+        String code = lastOtpFor(email);
+        doThrow(new IllegalStateException("cash account failed")).doCallRealMethod()
+                .when(accountService).createCashAccount(any());
+
+        assertThat(verifyOtp(inviteToken, code).statusCode()).isGreaterThanOrEqualTo(500);
+
+        assertThat(userRepository.existsByEmailIgnoreCase(email)).isFalse();
+        assertThat(inviteRepository.findByToken(inviteToken).orElseThrow().getStatus())
+                .isEqualTo(InviteStatus.AWAITING_OTP);
+        assertThat(verifyOtp(inviteToken, code).statusCode()).isEqualTo(200);
+        User user = userRepository.findByEmailIgnoreCase(email).orElseThrow();
+        assertThat(accountRepository.findByUserIdAndActiveTrue(user.getId())).hasSize(1);
     }
 
     @Test

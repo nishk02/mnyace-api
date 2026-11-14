@@ -1,5 +1,6 @@
 package com.mnyace.invite;
 
+import com.mnyace.account.AccountService;
 import com.mnyace.shared.util.EmailNormalizer;
 import com.mnyace.auth.*;
 import com.mnyace.shared.email.EmailService;
@@ -13,6 +14,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
@@ -38,6 +41,8 @@ public class InviteService {
     private final JwtUtil jwtUtil;
     private final RefreshTokenService refreshTokenService;
     private final SecurityEvents securityEvents;
+    private final AccountService accountService;
+    private final PlatformTransactionManager transactionManager;
     private final SecureRandom secureRandom = new SecureRandom();
 
     @Value("${app.max-users:50}")
@@ -164,18 +169,7 @@ public class InviteService {
         user.setConsentVersion(invite.getPendingConsentVersion());
         user.setConsentAcceptedAt(invite.getPendingConsentAt());
         user.setAdultConfirmed(invite.getPendingAdultConfirmed());
-        User savedUser = saveNewMember(user);
-
-        // Clear staged secrets now that they've done their job - no reason a
-        // completed invite row should keep holding a password hash forever.
-        invite.setStatus(InviteStatus.COMPLETED);
-        invite.setPendingPasswordHash(null);
-        invite.setOtpCodeHash(null);
-        invite.setPendingConsentVersion(null);
-        invite.setPendingConsentAt(null);
-        invite.setPendingAdultConfirmed(null);
-        inviteRepository.save(invite);
-        inviteRepository.deleteOthersForEmail(invite.getEmail(), invite.getId());
+        User savedUser = completeSignup(user, invite);
 
         RefreshTokenIssuer.IssuedRefreshToken refreshToken = refreshTokenService.issueNewFamily(savedUser, request.deviceLabel(), client);
         String accessToken = jwtUtil.generateToken(savedUser.getId(), savedUser.getEmail(), savedUser.getRole(), refreshToken.familyId());
@@ -221,11 +215,27 @@ public class InviteService {
         }
     }
 
-    /** Concurrent completions for one email can both pass the pre-check; the unique index lets one in, the rest read as unknown. */
-    private User saveNewMember(User user) {
+    /** The user, their Cash account and the invite's completion commit together, so a failure leaves the invite retryable. */
+    private User completeSignup(User user, Invite invite) {
         try {
-            return userRepository.saveAndFlush(user);
+            return new TransactionTemplate(transactionManager).execute(status -> {
+                User saved = userRepository.saveAndFlush(user);
+                accountService.createCashAccount(saved);
+
+                // Clear staged secrets now that they've done their job - no reason a
+                // completed invite row should keep holding a password hash forever.
+                invite.setStatus(InviteStatus.COMPLETED);
+                invite.setPendingPasswordHash(null);
+                invite.setOtpCodeHash(null);
+                invite.setPendingConsentVersion(null);
+                invite.setPendingConsentAt(null);
+                invite.setPendingAdultConfirmed(null);
+                inviteRepository.save(invite);
+                inviteRepository.deleteOthersForEmail(invite.getEmail(), invite.getId());
+                return saved;
+            });
         } catch (DataAccessException e) {
+            // Concurrent completions for one email can both pass the pre-check; the unique index lets one in, the rest read as unknown.
             if (userRepository.existsByEmailIgnoreCase(user.getEmail())) {
                 throw ApiException.notFound("Invite not found or expired");
             }
