@@ -95,6 +95,21 @@ class DashboardMonthlyTargetTest {
     }
 
     @Test
+    void asksToAddMoney_whenTheBalanceIsZeroOrOverdrawn() {
+        Goal emergency = goal("g1", "300000", "0", "12500", 24, 0);
+        when(goals.findByUserIdAndActiveTrueOrderByDisplayOrderAsc(USER_ID)).thenReturn(List.of(emergency));
+        when(credits.creditedThisMonth(emergency)).thenReturn(BigDecimal.ZERO);
+
+        for (String balance : List.of("0", "0.50", "-1000")) {
+            account.setCurrentBalance(new BigDecimal(balance));
+
+            assertThat(service.getDashboard(USER_ID).balance().savingsMessage())
+                    .as("balance " + balance)
+                    .isEqualTo("Add money to your accounts to start saving towards your goal!");
+        }
+    }
+
+    @Test
     void excludesAnUpcomingGoalFromTheMonthlyTarget() {
         Goal active = goal("g1", "300000", "0", "12500", 24, 0);
         Goal upcoming = goal("g2", "60000", "0", "10000", 6, 2);

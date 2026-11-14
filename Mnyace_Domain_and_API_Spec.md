@@ -1757,6 +1757,7 @@ Single endpoint — assembles everything the Home screen needs in one call.
 **`savingsMessage` logic (rounding corrected, v1.5.0; no-goals check corrected, v1.5.0):**
 - If no goal currently counts toward `monthlyTarget` (none exist, or every one is `COMPLETED`/`isUpcoming`) → `"Set a savings goal to get started!"` — checked via an explicit `hasActiveGoals` flag rather than `monthlyTarget == 0`, since `0` can also be the legitimate result of an active goal that needs nothing more (e.g. its progress has already reached the target).
 - Else, if `monthlyTarget − savedThisMonth < ₹1` → `"🎯 You are all set! Just hold on to it 💰"` — a sub-rupee remainder is rounding dust once real paise-level transactions are being netted in, not a meaningful amount to ask someone to go save; the old exact `savedThisMonth >= monthlyTarget` check missed this and could report "You can save ₹0 today!", which reads as nonsense rather than "you're basically done."
+- Else, if `totalAvailableBalance < ₹1` (zero, under a rupee, or overdrawn) → `"Add money to your accounts to start saving towards your goal!"` — a floored balance of ₹0 or below would read as "every ₹0 counts".
 - Else, if `totalAvailableBalance < remaining` → `"Save what you can — every ₹{totalAvailableBalance, floored} counts towards your goal! 💪"` (floored, since rounding *up* here would overstate money the user doesn't actually have).
 - Else → `"You can save ₹{remaining, ceiling} today!"` — ceiling, not floor: flooring a fractional remainder (e.g. ₹5000.60) would tell the user ₹5000 is enough when it's actually ₹0.60 short of the real target.
 
@@ -2335,7 +2336,11 @@ A user who has forgotten their password gets a 6-digit one-time code by email, t
 
 **Every user has exactly one Cash account.** Cash is not something users create: `POST /accounts` refuses `type: CASH`, and the name `Cash` is taken. The account is created with the user: at `verify-otp` for invited members (the user, their Cash account and the invite's completion commit in one transaction, so a failure leaves the invite open for a retry of the same code), at startup for the bootstrapped admin and test member. It is named `Cash`, has type `CASH`, and opens at ₹0 with no opening-balance entry.
 
+**Cash cannot be overdrawn.** An income, expense, transfer, edit or delete that would take the Cash balance below ₹0 returns `400` (`This would take your Cash balance below ₹0, by ₹X. Update your cash balance first.`). A bank or wallet account may go negative, since an overdraft is real; a transfer larger than its source balance is refused for every type, as before. The guard refuses only an entry that makes a negative balance worse, so correcting an already negative Cash balance is never blocked.
+
 **The user sets what they hold.** The balance is edited through `PUT /accounts/{id}` like any account, so a change records a `SETTLEMENT/Adjustment` (BR-02) and the usual goal-earmark guard applies. The account's name and colour can be edited. Its type can't change, no other account can become `CASH`, and it can't be deleted.
+
+**Goals need a non-negative account.** A goal can't be created on, or moved to, an account whose balance is below ₹0 (`400`, `This account's balance is below ₹0. Bring it to ₹0 or more before linking a goal.`), so goal savings always sit in real money and the goal-protected balance never starts overdrawn.
 
 **Everything else treats it as an ordinary account.** It counts in the accounts total and the dashboard balance, takes income, expense and transfers, and can back a goal (BR-12).
 
