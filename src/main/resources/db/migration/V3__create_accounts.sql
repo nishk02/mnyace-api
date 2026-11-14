@@ -15,3 +15,5 @@ CREATE TABLE accounts
 );
 
 CREATE INDEX idx_accounts_user ON accounts (user_id);
+
+CREATE UNIQUE INDEX idx_accounts_one_cash_per_user ON accounts (user_id) WHERE type = 'CASH';

@@ -650,6 +650,7 @@ CREATE TABLE accounts (
 );
 
 CREATE INDEX idx_accounts_user ON accounts(user_id);
+CREATE UNIQUE INDEX idx_accounts_one_cash_per_user ON accounts(user_id) WHERE type = 'CASH';
 
 -- ============================================================
 -- CATEGORIES (seeded, user cannot delete system ones)
@@ -2334,7 +2335,7 @@ A user who has forgotten their password gets a 6-digit one-time code by email, t
 
 ### BR-32: Seeded Cash Account
 
-**Every user has exactly one Cash account.** Cash is not something users create: `POST /accounts` refuses `type: CASH`, and the name `Cash` is taken. The account is created with the user: at `verify-otp` for invited members (the user, their Cash account and the invite's completion commit in one transaction, so a failure leaves the invite open for a retry of the same code), at startup for the bootstrapped admin and test member. It is named `Cash`, has type `CASH`, and opens at ₹0 with no opening-balance entry.
+**Every user has exactly one Cash account**, enforced by a unique partial index on `accounts(user_id)` where `type = 'CASH'`. Cash is not something users create: `POST /accounts` refuses `type: CASH`, and the name `Cash` is taken. The account is created with the user: at `verify-otp` for invited members (the user, their Cash account and the invite's completion commit in one transaction, so a failure leaves the invite open for a retry of the same code), at startup for the bootstrapped admin and test member. It is named `Cash`, has type `CASH`, and opens at ₹0 with no opening-balance entry.
 
 **Cash cannot be overdrawn.** An income, expense, transfer, edit or delete that would take the Cash balance below ₹0 returns `400` (`This would take your Cash balance below ₹0, by ₹X. Update your cash balance first.`). A bank or wallet account may go negative, since an overdraft is real; a transfer larger than its source balance is refused for every type, as before. The guard refuses only an entry that makes a negative balance worse, so correcting an already negative Cash balance is never blocked.
 

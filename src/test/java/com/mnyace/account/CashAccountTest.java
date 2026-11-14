@@ -2,14 +2,24 @@ package com.mnyace.account;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.mnyace.auth.AuthIntegrationTestBase;
+import com.mnyace.auth.User;
+import com.mnyace.auth.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 
 import java.net.http.HttpResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CashAccountTest extends AuthIntegrationTestBase {
+    @Autowired
+    private UserRepository users;
+    @Autowired
+    private AccountRepository accounts;
+
     private String auth;
 
     @BeforeEach
@@ -69,6 +79,18 @@ class CashAccountTest extends AuthIntegrationTestBase {
 
         assertThat(delete("/api/accounts/" + id, "Authorization", auth).statusCode()).isEqualTo(400);
         assertThat(cashAccount().path("id").asText()).isEqualTo(id);
+    }
+
+    @Test
+    void theDatabase_refusesASecondCashAccountForOneUser() {
+        User admin = users.findByEmailIgnoreCase(ADMIN_EMAIL).orElseThrow();
+        Account second = new Account();
+        second.setUser(admin);
+        second.setName("Second cash");
+        second.setType(Account.CASH_TYPE);
+
+        assertThatThrownBy(() -> accounts.saveAndFlush(second)).isInstanceOf(DataAccessException.class)
+                .hasMessageContaining("UNIQUE constraint failed");
     }
 
     private JsonNode cashAccount() {
