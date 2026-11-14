@@ -21,6 +21,9 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @EntityListeners(AuditingEntityListener.class)
 public class Account {
+    public static final String CASH_TYPE = "CASH";
+    public static final String CASH_NAME = "Cash";
+
     @Id
     @UuidGenerator
     @Column(updatable = false, nullable = false)

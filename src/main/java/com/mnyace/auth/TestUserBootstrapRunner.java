@@ -1,5 +1,6 @@
 package com.mnyace.auth;
 
+import com.mnyace.account.AccountService;
 import com.mnyace.shared.util.EmailMasker;
 import com.mnyace.shared.util.EmailNormalizer;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ public class TestUserBootstrapRunner implements CommandLineRunner {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AccountService accountService;
 
     @Value("${test-user.bootstrap.email:}")
     private String email;
@@ -51,7 +53,7 @@ public class TestUserBootstrapRunner implements CommandLineRunner {
         user.setEmail(EmailNormalizer.normalize(email));
         user.setPasswordHash(passwordEncoder.encode(password));
         user.setRole("MEMBER");
-        userRepository.save(user);
+        accountService.createCashAccount(userRepository.save(user));
 
         log.info("Bootstrapped test member account: {}", EmailMasker.mask(email));
     }

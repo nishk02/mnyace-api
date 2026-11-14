@@ -1,5 +1,6 @@
 package com.mnyace.auth;
 
+import com.mnyace.account.AccountService;
 import com.mnyace.shared.util.EmailMasker;
 import com.mnyace.shared.util.EmailNormalizer;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,7 @@ public class AdminBootstrapRunner implements CommandLineRunner {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AccountService accountService;
 
     @Value("${admin.bootstrap.email:}")
     private String adminEmail;
@@ -45,7 +47,7 @@ public class AdminBootstrapRunner implements CommandLineRunner {
         admin.setEmail(EmailNormalizer.normalize(adminEmail));
         admin.setPasswordHash(passwordEncoder.encode(adminPassword));
         admin.setRole("ADMIN");
-        userRepository.save(admin);
+        accountService.createCashAccount(userRepository.save(admin));
 
         log.info("Bootstrapped initial admin account: {}", EmailMasker.mask(adminEmail));
     }
