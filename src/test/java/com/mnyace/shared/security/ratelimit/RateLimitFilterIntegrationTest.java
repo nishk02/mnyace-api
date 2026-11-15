@@ -81,6 +81,19 @@ class RateLimitFilterIntegrationTest {
     }
 
     @Test
+    void logout_sharesTheRefreshBucket() throws Exception {
+        assertLimitedAfter(refreshIpCapacity, "/auth/logout", "10.1.0.5", i -> "{\"refreshToken\":\"x\"}");
+    }
+
+    @Test
+    void inviteLookup_isRateLimitedPerIp() throws Exception {
+        for (int i = 0; i < inviteIpCapacity; i++) {
+            assertThat(get("/auth/invites/abc", "10.1.0.9").statusCode()).isNotEqualTo(429);
+        }
+        assertThat(get("/auth/invites/abc", "10.1.0.9").statusCode()).isEqualTo(429);
+    }
+
+    @Test
     void inviteVerifyOtp_plainPath_isRateLimitedPerIp() throws Exception {
         assertLimitedAfter(inviteIpCapacity, "/auth/invites/abc/verify-otp", "10.1.0.7", i -> "{\"code\":\"000000\"}");
     }
