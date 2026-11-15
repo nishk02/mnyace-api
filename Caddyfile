@@ -25,8 +25,8 @@
     # so the web app can read it instead of seeing a network failure.
     handle_errors {
         @down expression {http.error.status_code} in [502, 503, 504]
-        @allowedOrigin expression {http.request.header.Origin} in ["capacitor://localhost", "ionic://localhost", "https://app.mnyace.com"]
-        @preflight expression {http.error.status_code} in [502, 503, 504] && {http.request.method} == "OPTIONS" && {http.request.header.Origin} in ["capacitor://localhost", "ionic://localhost", "https://app.mnyace.com"]
+        @allowedOrigin expression {http.request.header.Origin} in ["capacitor://localhost", "ionic://localhost", "https://localhost", "https://app.mnyace.com"]
+        @preflight expression {http.error.status_code} in [502, 503, 504] && {http.request.method} == "OPTIONS" && {http.request.header.Origin} in ["capacitor://localhost", "ionic://localhost", "https://localhost", "https://app.mnyace.com"]
 
         # A preflight during an outage is answered here, so the browser goes on to send the real request.
         handle @preflight {
