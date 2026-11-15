@@ -74,6 +74,25 @@ class CashAccountTest extends AuthIntegrationTestBase {
     }
 
     @Test
+    void onTheCashAccount_onlyTheBalanceCanBeEdited() {
+        JsonNode cash = cashAccount();
+        String id = cash.path("id").asText();
+
+        assertThat(put("/api/accounts/" + id, "{\"name\":\"Pocket money\"}", "Authorization", auth).statusCode())
+                .isEqualTo(400);
+        assertThat(put("/api/accounts/" + id, "{\"colorLabel\":\"blue\"}", "Authorization", auth).statusCode())
+                .isEqualTo(400);
+        assertThat(cashAccount().path("name").asText()).isEqualTo("Cash");
+
+        // the edit form resends the unchanged fields alongside the new balance
+        HttpResponse<String> response = put("/api/accounts/" + id,
+                "{\"name\":\"Cash\",\"type\":\"CASH\",\"currentBalance\":75}", "Authorization", auth);
+        assertThat(response.statusCode()).isEqualTo(200);
+        assertThat(cashAccount().path("currentBalance").decimalValue()).isEqualByComparingTo("75");
+        put("/api/accounts/" + id, "{\"currentBalance\":0}", "Authorization", auth);
+    }
+
+    @Test
     void theCashAccount_cannotBeDeleted() {
         String id = cashAccount().path("id").asText();
 

@@ -88,6 +88,10 @@ public class AccountService {
         Account account = accountRepository.findByIdAndUserId(accountId, userId)
                 .orElseThrow(() -> ApiException.notFound("Account not found"));
 
+        if (Account.CASH_TYPE.equals(account.getType()) && changesAnythingButBalance(account, request)) {
+            throw ApiException.badRequest("The Cash account can only have its balance edited.");
+        }
+
         if (request.name() != null
                 && !request.name().equalsIgnoreCase(account.getName())
                 && accountRepository.existsByUserIdAndNameIgnoreCase(userId, request.name())
@@ -219,5 +223,12 @@ public class AccountService {
 
     private String formatAmount(BigDecimal amount) {
         return amount.stripTrailingZeros().toPlainString();
+    }
+
+    /** The edit form resends every field, so only a value that differs from the stored one counts as a change. */
+    private boolean changesAnythingButBalance(Account account, UpdateAccountRequest request) {
+        return (request.name() != null && !request.name().equals(account.getName()))
+                || (request.type() != null && !request.type().equals(account.getType()))
+                || (request.colorLabel() != null && !request.colorLabel().equals(account.getColorLabel()));
     }
 }

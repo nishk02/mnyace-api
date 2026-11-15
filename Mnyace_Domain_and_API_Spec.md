@@ -1354,7 +1354,7 @@ Useful for filtering account dropdowns in various UI contexts (e.g. show only BA
 
 #### PUT /accounts/{id} — name, type, colorLabel, currentBalance (triggers BR-02's auto `SETTLEMENT/Adjustment`).
 
-The seeded Cash account is edited here like any other: setting `currentBalance` records what cash the user holds today. Its `type` can't change, and no other account can become `CASH` (`400`).
+On the seeded Cash account only `currentBalance` can be edited: setting it records what cash the user holds today. A request that changes its `name`, `type` or `colorLabel` returns `400` (`The Cash account can only have its balance edited.`); resending the stored values unchanged is fine. No other account can become `CASH` (`400`).
 
 **Downward correction on a goal-linked account (v1.5.0 — see BR-20):**
 ```json
