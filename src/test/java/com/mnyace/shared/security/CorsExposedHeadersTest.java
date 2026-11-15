@@ -23,4 +23,16 @@ class CorsExposedHeadersTest extends AuthIntegrationTestBase {
                 .contains("X-Request-Id");
         assertThat(response.headers().firstValue("X-Request-Id")).isPresent();
     }
+
+    // The Android app's WebView serves its pages from https://localhost.
+    @Test
+    void theAndroidAppOrigin_isAllowed() {
+        String origin = "https://localhost";
+
+        HttpResponse<String> response = post("/auth/signin",
+                "{\"email\":\"nobody@example.com\",\"password\":\"wrong-password\"}",
+                "Origin", origin, "X-Forwarded-For", freshIp());
+
+        assertThat(response.headers().firstValue("Access-Control-Allow-Origin")).contains(origin);
+    }
 }
