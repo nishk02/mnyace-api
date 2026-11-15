@@ -25,8 +25,8 @@ import java.util.HexFormat;
 import java.util.regex.Pattern;
 
 /**
- * Rate-limits POST /auth/signin, POST /auth/refresh, the invite POSTs, the forgot- and reset-password POSTs
- * and every /api/** call, ahead of
+ * Rate-limits POST /auth/signin, POST /auth/refresh and /auth/logout, the invite POSTs and the invite-link lookup,
+ * the forgot- and reset-password POSTs and every /api/** call, ahead of
  * JwtAuthFilter. These are permitAll (no JWT to gate them) — exactly why
  * they're worth protecting here: signin is the one place a password can be
  * guessed at all, and refresh is a DoS target because it does real work
@@ -45,6 +45,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
     // The invite POSTs (signup, verify-otp, resend-otp) are public too; verify-otp is a guessable 6-digit code.
     private static final Pattern INVITE_ACTION_PATH =
             Pattern.compile("/auth/invites/[^/]+/(signup|verify-otp|resend-otp)");
+    // So is the GET that opens an invite link; it shares the invite bucket.
+    private static final Pattern INVITE_LOOKUP_PATH = Pattern.compile("/auth/invites/[^/]+");
 
     // forgot-password sends mail (IP buckets only; the per-email and daily mail caps live in the service),
     // reset-password takes guesses at a code (IP and email buckets).
@@ -120,9 +122,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         boolean isSignin = isPost(request) && "/auth/signin".equals(path);
-        boolean isRefresh = isPost(request) && "/auth/refresh".equals(path);
+        // logout shares the refresh bucket: it looks a refresh token up on every call too
+        boolean isRefresh = isPost(request) && ("/auth/refresh".equals(path) || "/auth/logout".equals(path));
 
-        boolean isInviteAction = isPost(request) && INVITE_ACTION_PATH.matcher(path).matches();
+        boolean isInviteAction = (isPost(request) && INVITE_ACTION_PATH.matcher(path).matches())
+                || ("GET".equalsIgnoreCase(request.getMethod()) && INVITE_LOOKUP_PATH.matcher(path).matches());
 
         boolean isForgotPassword = isPost(request) && FORGOT_PASSWORD_PATH.equals(path);
         boolean isResetPassword = isPost(request) && RESET_PASSWORD_PATH.equals(path);
