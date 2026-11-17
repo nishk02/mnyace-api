@@ -14,7 +14,9 @@ http:
     type: json
     data: |-
       {
-        "currentBalance": 37500.00
+        "currentBalance": 37500.00,
+        "accountSuffix": "3388",
+        "cardSuffixes": ["8155", "4021"]
       }
   auth:
     type: bearer

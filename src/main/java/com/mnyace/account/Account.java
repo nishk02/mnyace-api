@@ -13,6 +13,7 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "accounts")
@@ -47,6 +48,13 @@ public class Account {
 
     @Column(name = "color_label")
     private String colorLabel;
+
+    @Column(name = "account_suffix")
+    private String accountSuffix;
+
+    @Convert(converter = CardSuffixesConverter.class)
+    @Column(name = "card_suffixes", nullable = false)
+    private List<String> cardSuffixes = List.of();
 
     @Column(name = "display_order", nullable = false)
     private int displayOrder = 0;

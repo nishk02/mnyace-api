@@ -37,6 +37,13 @@ public record CreateTransactionRequest(
 
         @Valid
         @Size(max = 50, message = "Too many goal allocations")
-        List<GoalAllocationItem> goalAllocations
+        List<GoalAllocationItem> goalAllocations,
+
+        // Client-generated key for an imported transaction; a repeat is refused so a re-read creates nothing twice.
+        @Size(max = 64, message = "Import reference must be at most 64 characters")
+        String importRef,
+
+        // How the transaction was created; MANUAL when omitted.
+        TransactionSource source
 ) {
 }
