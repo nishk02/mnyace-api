@@ -2,6 +2,7 @@ package com.mnyace.account;
 
 
 import java.math.BigDecimal;
+import java.util.List;
 
 public record AccountResponse(
         String id,
@@ -10,6 +11,8 @@ public record AccountResponse(
         BigDecimal currentBalance,
         String currency,
         String colorLabel,
+        String accountSuffix,
+        List<String> cardSuffixes,
         int displayOrder,
         boolean goalLinked
 ) {
@@ -21,6 +24,8 @@ public record AccountResponse(
                 account.getCurrentBalance(),
                 account.getCurrency(),
                 account.getColorLabel(),
+                account.getAccountSuffix(),
+                account.getCardSuffixes(),
                 account.getDisplayOrder(),
                 goalLinked
         );

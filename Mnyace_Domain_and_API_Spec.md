@@ -220,6 +220,8 @@ Derived from: Add Account screen (page 38), Accounts list (page 39), Excel Accou
 | `currentBalance` | BigDecimal | Source of truth — updated with every transaction |
 | `currency` | String | Default `INR` |
 | `colorLabel` | String | Hex colour code for UI display |
+| `accountSuffix` | String, nullable | Last 3 or 4 digits of the bank account, digits only. `BANK` only (BR-33) |
+| `cardSuffixes` | List of String | Last 4 digits of each debit card, up to 5, no repeats. Empty by default. `BANK` only (BR-33) |
 | `displayOrder` | Integer | For UI ordering |
 | `isActive` | Boolean | Soft delete flag |
 | `createdAt` | LocalDateTime | |
@@ -289,6 +291,8 @@ Derived from: Cash Flow screens (pages 30–36), Excel monthly sheets
 | `amount` | BigDecimal | Always stored as positive. Sign derived from type at read time. |
 | `goalCreditApplied` | BigDecimal | *(added v1.5.0)* Nullable — only set for a TRANSFER with `toGoalId`. How much of `amount` actually landed on the goal's `currentProgress`, after BR-23's headroom clamp. Serialized on `TransactionResponse` — see BR-23. |
 | `notes` | String | Description, set at creation. Editable via `PUT` for all types except `SETTLEMENT` — see BR-11. |
+| `source` | Enum | `MANUAL` (default) or `SMS`: how the transaction was created. Set at creation, never edited. Returned on every transaction (BR-34). |
+| `importRef` | String, nullable | Client-generated key (max 64) for an imported transaction. Unique per user; a repeat is refused (BR-34). Write-only: set at creation, not returned. |
 | `financialYear` | String | e.g. `FY24-25` — derived server-side from `date`, not user input. See "Two calendars" below. |
 | `month` | Integer | 1–12, where 1=April, 12=March — derived server-side. See "Two calendars" below. |
 | `calendarMonth` | Integer | Standard calendar month 1–12, derived server-side from `date` |
@@ -642,14 +646,18 @@ CREATE TABLE accounts (
     current_balance REAL NOT NULL DEFAULT 0,
     currency TEXT NOT NULL DEFAULT 'INR',
     color_label TEXT,
+    account_suffix TEXT CHECK(account_suffix IS NULL OR (length(account_suffix) BETWEEN 3 AND 4 AND account_suffix NOT GLOB '*[^0-9]*')),
+    card_suffixes TEXT NOT NULL DEFAULT '',          -- comma-separated 4-digit endings
     display_order INTEGER NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
-    UNIQUE(user_id, name)
+    UNIQUE(user_id, name),
+    CHECK(type = 'BANK' OR (account_suffix IS NULL AND card_suffixes = ''))
 );
 
 CREATE INDEX idx_accounts_user ON accounts(user_id);
+CREATE UNIQUE INDEX idx_accounts_user_account_suffix ON accounts(user_id, account_suffix) WHERE account_suffix IS NOT NULL;
 CREATE UNIQUE INDEX idx_accounts_one_cash_per_user ON accounts(user_id) WHERE type = 'CASH';
 
 -- ============================================================
@@ -729,6 +737,8 @@ CREATE TABLE transactions (
     to_goal_id TEXT REFERENCES goals(id),
     amount REAL NOT NULL CHECK(amount > 0),
     notes TEXT,
+    import_ref TEXT,
+    source TEXT NOT NULL DEFAULT 'MANUAL' CHECK(source IN ('MANUAL','SMS')),
     financial_year TEXT NOT NULL,
     month INTEGER NOT NULL CHECK(month BETWEEN 1 AND 12),
     calendar_month INTEGER NOT NULL,
@@ -742,6 +752,8 @@ CREATE TABLE transactions (
     -- a goal), not an alternative to it — see BR-05 and BR-07.
     CHECK(type != 'TRANSFER' OR to_account_id IS NOT NULL)
 );
+
+CREATE UNIQUE INDEX idx_transactions_user_import_ref ON transactions(user_id, import_ref) WHERE import_ref IS NOT NULL;
 
 -- ============================================================
 -- TRANSACTION GOAL ALLOCATIONS (withdrawal ledger — v1.5.0, BR-19)
@@ -1321,10 +1333,12 @@ No body. Issues a fresh code; the guess counter is not reset. Rate-limited to on
   "type": "BANK",
   "currentBalance": 35000.00,
   "currency": "INR",
-  "colorLabel": "#E8A04D"
+  "colorLabel": "#E8A04D",
+  "accountSuffix": "3388",
+  "cardSuffixes": ["8155"]
 }
 ```
-`type` must be `BANK` or `WALLET`: `CASH` returns `400` (`Type must be BANK or WALLET; every user already has a Cash account`), and the name `Cash` is already taken (`409`).  
+`accountSuffix` and `cardSuffixes` are optional and `BANK` only; see BR-33 for the rules and the `400` they return. `type` must be `BANK` or `WALLET`: `CASH` returns `400` (`Type must be BANK or WALLET; every user already has a Cash account`), and the name `Cash` is already taken (`409`).  
 **Response 201:** Full account object  
 **Side effect:** If `currentBalance > 0`, auto-creates a `SETTLEMENT/Adjustment` transaction. This produces the "Current Balance / Adjustment" entries visible in the Figma Cash Flow list.  
 **Side effect:** Increments `user.onboardingStep` to 1 if currently 0.
@@ -1340,8 +1354,8 @@ Useful for filtering account dropdowns in various UI contexts (e.g. show only BA
 {
   "data": {
     "accounts": [
-      { "id": "uuid", "name": "Cash", "type": "CASH", "currentBalance": 1250.00, "colorLabel": null, "goalLinked": false },
-      { "id": "uuid", "name": "India Bank", "type": "BANK", "currentBalance": 3457.55, "colorLabel": "#4A90D9", "goalLinked": true }
+      { "id": "uuid", "name": "Cash", "type": "CASH", "currentBalance": 1250.00, "colorLabel": null, "accountSuffix": null, "cardSuffixes": [], "goalLinked": false },
+      { "id": "uuid", "name": "India Bank", "type": "BANK", "currentBalance": 3457.55, "colorLabel": "#4A90D9", "accountSuffix": "3388", "cardSuffixes": ["8155"], "goalLinked": true }
     ],
     "totalBalance": 38457.55
   }
@@ -1352,7 +1366,9 @@ Useful for filtering account dropdowns in various UI contexts (e.g. show only BA
 
 #### GET /accounts/{id} — same shape as a single entry above, including `goalLinked`.
 
-#### PUT /accounts/{id} — name, type, colorLabel, currentBalance (triggers BR-02's auto `SETTLEMENT/Adjustment`).
+#### PUT /accounts/{id} — name, type, colorLabel, accountSuffix, cardSuffixes, currentBalance (triggers BR-02's auto `SETTLEMENT/Adjustment`).
+
+`accountSuffix` and `cardSuffixes` follow BR-33: omitted leaves a field unchanged, an explicit `null` clears `accountSuffix`, and `cardSuffixes` replaces the whole list (`[]` clears it). They are checked before anything is changed and never affect the balance or the goal-allocation flow below.
 
 On the seeded Cash account only `currentBalance` can be edited: setting it records what cash the user holds today. A request that changes its `name`, `type` or `colorLabel` returns `400` (`The Cash account can only have its balance edited.`); resending the stored values unchanged is fine. No other account can become `CASH` (`400`).
 
@@ -1434,6 +1450,20 @@ Three request shapes depending on the tab selected in the Add Entry form.
   "notes": "Emergency Fund"
 }
 ```
+
+**Imported from a bank SMS (BR-34):** any shape above also accepts two optional fields.
+```json
+{
+  "type": "VARIABLE_EXPENSE",
+  "date": "2024-06-14",
+  "amount": 919.19,
+  "categoryId": "cat-12",
+  "accountId": "uuid-maxis",
+  "importRef": "9f2c…e1",
+  "source": "SMS"
+}
+```
+`importRef` is at most 64 characters and unique per user: a repeat returns `409 DUPLICATE_IMPORT` (details carry the existing `transactionId`) and creates nothing, so re-reading an SMS is safe. `source` is `MANUAL` or `SMS`, `MANUAL` when omitted; any other value returns `400`.
 
 **Transfer withdrawing from a goal-linked account, exceeding free balance (v1.5.0 — see BR-19):**
 ```json
@@ -2344,6 +2374,24 @@ A user who has forgotten their password gets a 6-digit one-time code by email, t
 **Goals need a non-negative account.** A goal can't be created on, or moved to, an account whose balance is below ₹0 (`400`, `This account's balance is below ₹0. Bring it to ₹0 or more before linking a goal.`), so goal savings always sit in real money and the goal-protected balance never starts overdrawn.
 
 **Everything else treats it as an ordinary account.** It counts in the accounts total and the dashboard balance, takes income, expense and transfers, and can back a goal (BR-12).
+
+### BR-33: Account and Card Digits
+
+**Why:** the Android app turns a bank SMS into a transaction, and the SMS names the account by its last 3 or 4 digits (`A/c XX3388`) and a card spend by its last 4 (`Card x8155`). The app matches those digits against the user's accounts, so the account stores them. Only these endings are ever stored, never a full account or card number.
+
+**Shape.** `accountSuffix` is 3 or 4 digits; each `cardSuffixes` entry is exactly 4 digits, with no repeats and at most 5 per account. Only a `BANK` account may have either: `WALLET` and `CASH` return `400`. On the Cash account, a `null` or empty value counts as unchanged, since the edit form resends every field. Changing a `BANK` account's type needs its digits cleared in the same request.
+
+**Unique per user among active accounts**, because a match must be unambiguous. A card ending may not appear on two accounts, and an account suffix may not equal, or be the tail of, another account's suffix (`388` and `3388` could not be told apart in an SMS). Each breach returns `400 VALIDATION_ERROR` naming the field and never echoing the digits. Deleting an account clears its digits, so they are free to reuse. The database backs this with a unique index on `(user_id, account_suffix)`, a `CHECK` on length and digits, and a `CHECK` that only `BANK` rows carry any.
+
+**Editing.** On `PUT /accounts/{id}`, an omitted field is left alone, an explicit `null` clears `accountSuffix`, and `cardSuffixes` replaces the list. The rules run before any field is changed, so a refused edit changes nothing, including the balance. The digits are not sensitive beyond the account name, but they are kept out of logs.
+
+### BR-34: Import Reference and Source
+
+**Why:** the Android app turns bank SMS into transactions and may read the same SMS more than once (a re-scan, a reinstall). Nothing else in the API is idempotent, so `POST /transactions` takes an optional `importRef`.
+
+**`importRef` is unique per user.** It is a key the client makes up: the bank's reference number when the SMS carries one, otherwise a hash of the date, amount, card digits, merchant and the time the SMS arrived, so two genuine identical purchases differ while re-reading one SMS does not. A transaction that repeats a ref returns `409 DUPLICATE_IMPORT` with the existing transaction's id in `details`, and changes no balance and no goal. The check runs before anything is applied; a unique index backs it, so two simultaneous requests cannot both succeed (the loser answers `409` without the id). Blank counts as absent. Users are independent: the same ref is fine for two users. Deleting a transaction frees its ref, so the same SMS can be imported again afterwards.
+
+**`source` records how a transaction was created**, `MANUAL` (typed in, the default) or `SMS`. It is set at creation and not editable, is returned on every transaction, and exists so the app can mark imports and analytics can split them out. Balance adjustments the API creates itself are `MANUAL`.
 
 ---
 

@@ -14,6 +14,7 @@ import com.mnyace.shared.exception.ApiException;
 import com.mnyace.shared.util.AppClock;
 import com.mnyace.shared.util.FinancialYearUtil;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -141,6 +142,14 @@ public class TransactionService {
     public TransactionResult createTransaction(String userId, CreateTransactionRequest request) {
         User user = userRepository.findById(userId).orElseThrow(() -> ApiException.notFound("User not found"));
 
+        // BR-34: checked before anything is applied, so a repeat changes no balance
+        String importRef = request.importRef() == null || request.importRef().isBlank() ? null : request.importRef().trim();
+        if (importRef != null) {
+            transactionRepository.findByUserIdAndImportRef(userId, importRef).ifPresent(existing -> {
+                throw duplicateImport(existing.getId());
+            });
+        }
+
         Account account = accountRepository.findByIdAndUserId(request.accountId(), userId)
                 .orElseThrow(() -> ApiException.notFound("Account not found"));
 
@@ -168,6 +177,10 @@ public class TransactionService {
         }
 
         Transaction transaction = buildTransaction(user, account, category, toAccount, request);
+        transaction.setImportRef(importRef);
+        if (request.source() != null) {
+            transaction.setSource(request.source());
+        }
 
         guardWithdrawalAllocation(account, request.type(), request.toGoalId(), request.amount(), request.goalAllocations());
 
@@ -181,7 +194,7 @@ public class TransactionService {
         accountRepository.save(account);
         if (toAccount != null) accountRepository.save(toAccount);
 
-        Transaction saved = transactionRepository.save(transaction);
+        Transaction saved = saveImported(transaction, importRef);
 
         // BR-07: update goal progress when TRANSFER targets a goal, or draws down goal(s) on withdrawal
         String goalCreditInfo = applyGoalProgress(transaction, request.goalAllocations());
@@ -421,6 +434,28 @@ public class TransactionService {
         }
 
         return null;
+    }
+
+    /** Two requests with one importRef can both pass the check above; the unique index decides, and the loser is rolled back. */
+    private Transaction saveImported(Transaction transaction, String importRef) {
+        if (importRef == null) {
+            return transactionRepository.save(transaction);
+        }
+        try {
+            return transactionRepository.saveAndFlush(transaction);
+        } catch (DataAccessException e) {
+            // SQLite reports the unique index as a generic error, so match on its text
+            if (e.getMessage() == null || !e.getMessage().contains("UNIQUE constraint failed")) {
+                throw e;
+            }
+            // no lookup here: the failed flush leaves this session unfit for more queries
+            throw duplicateImport(null);
+        }
+    }
+
+    private ApiException duplicateImport(String existingId) {
+        return ApiException.conflict(ApiErrorCodes.DUPLICATE_IMPORT,
+                "This transaction was already imported.", existingId == null ? null : Map.of("transactionId", existingId));
     }
 
     private Transaction buildTransaction(

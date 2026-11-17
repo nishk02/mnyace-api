@@ -26,6 +26,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, String
             String userId, String financialYear, int month, Pageable pageable);
 
     Optional<Transaction> findByIdAndUserId(String id, String userId);
+
+    Optional<Transaction> findByUserIdAndImportRef(String userId, String importRef);
     /** Account deletion: one statement, not one per row. Native, so it needs no entity loading. */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query(value = "DELETE FROM transactions WHERE user_id = :userId", nativeQuery = true)

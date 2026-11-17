@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 public record CreateAccountRequest(
         @NotBlank(message = "Account name is required")
@@ -22,6 +23,12 @@ public record CreateAccountRequest(
         BigDecimal currentBalance,
 
         @Size(max = 30, message = "Color label must be at most 30 characters")
-        String colorLabel
+        String colorLabel,
+
+        // BANK only; digits are checked by AccountSuffixes so create and update answer alike
+        String accountSuffix,
+
+        @Size(max = 20, message = "Too many card numbers")
+        List<String> cardSuffixes
 ) {
 }

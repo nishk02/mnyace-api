@@ -21,6 +21,8 @@ CREATE TABLE transactions
     is_planned          INTEGER     NOT NULL DEFAULT 0,
     planned_amount_id   TEXT,
     goal_credit_applied REAL,
+    import_ref          TEXT,
+    source              TEXT        NOT NULL DEFAULT 'MANUAL' CHECK (source IN ('MANUAL', 'SMS')),
     created_at          TIMESTAMP   NOT NULL,
     updated_at          TIMESTAMP   NOT NULL,
     CHECK (type != 'TRANSFER' OR to_account_id IS NOT NULL)
@@ -30,3 +32,5 @@ CREATE INDEX idx_transactions_user_date ON transactions (user_id, date DESC);
 CREATE INDEX idx_transactions_user_calendar ON transactions (user_id, calendar_year, calendar_month);
 CREATE INDEX idx_transactions_user_fy_month ON transactions (user_id, financial_year, month);
 CREATE INDEX idx_transactions_account ON transactions (account_id);
+-- A client-generated key for an imported transaction (e.g. from a bank SMS), so reading it twice creates it once
+CREATE UNIQUE INDEX idx_transactions_user_import_ref ON transactions (user_id, import_ref) WHERE import_ref IS NOT NULL;

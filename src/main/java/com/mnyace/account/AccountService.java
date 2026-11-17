@@ -1,5 +1,6 @@
 package com.mnyace.account;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.mnyace.auth.User;
 import com.mnyace.auth.UserRepository;
 import com.mnyace.goal.Goal;
@@ -47,11 +48,16 @@ public class AccountService {
             throw ApiException.conflict("An account name '" + request.name() + "' already exists");
         }
 
+        List<String> cardSuffixes = request.cardSuffixes() != null ? request.cardSuffixes() : List.of();
+        AccountSuffixes.validate(request.type(), request.accountSuffix(), cardSuffixes, otherActiveAccounts(userId, null));
+
         Account account = new Account();
 
         account.setUser(user);
         account.setName(request.name());
         account.setType(request.type());
+        account.setAccountSuffix(request.accountSuffix());
+        account.setCardSuffixes(List.copyOf(cardSuffixes));
         account.setCurrentBalance(request.currentBalance() != null ? request.currentBalance() : BigDecimal.ZERO);
         account.setCurrency("INR");
         account.setColorLabel(request.colorLabel());
@@ -99,6 +105,13 @@ public class AccountService {
             throw ApiException.conflict("An account named '" + request.name() + "' already exists");
         }
 
+        // Checked before any field is touched: the lookup below would auto-flush a half-changed account into the
+        // BANK-only constraint and answer 500 instead of 400.
+        String newSuffix = resolveAccountSuffix(request.accountSuffix(), account.getAccountSuffix());
+        List<String> newCards = request.cardSuffixes() != null ? request.cardSuffixes() : account.getCardSuffixes();
+        AccountSuffixes.validate(request.type() != null ? request.type() : account.getType(), newSuffix, newCards,
+                otherActiveAccounts(userId, account.getId()));
+
         BigDecimal oldBalance = account.getCurrentBalance();
 
         if (request.name() != null) {
@@ -116,6 +129,9 @@ public class AccountService {
         if (request.colorLabel() != null) {
             account.setColorLabel(request.colorLabel());
         }
+
+        account.setAccountSuffix(newSuffix);
+        account.setCardSuffixes(List.copyOf(newCards));
 
         boolean balanceChanged = request.currentBalance() != null
                 && request.currentBalance().compareTo(oldBalance) != 0;
@@ -199,8 +215,31 @@ public class AccountService {
             throw ApiException.badRequest("The Cash account can't be deleted.");
         }
 
+        // frees the digits for another account; matching only ever looks at active ones
+        account.setAccountSuffix(null);
+        account.setCardSuffixes(List.of());
         account.setActive(false);
         accountRepository.save(account);
+    }
+
+    /** Omitted leaves the stored value, an explicit null clears it, text replaces it. */
+    private String resolveAccountSuffix(JsonNode requested, String stored) {
+        if (requested == null) {
+            return stored;
+        }
+        if (requested.isNull()) {
+            return null;
+        }
+        if (!requested.isTextual()) {
+            throw ApiException.badRequest("VALIDATION_ERROR", "accountSuffix must be 3 or 4 digits", null);
+        }
+        return requested.asText();
+    }
+
+    private List<Account> otherActiveAccounts(String userId, String exceptId) {
+        return accountRepository.findByUserIdAndActiveTrue(userId).stream()
+                .filter(a -> !a.getId().equals(exceptId))
+                .toList();
     }
 
     private List<AccountResponse> mapAccounts(List<Account> accounts, String userId) {

@@ -1,5 +1,6 @@
 package com.mnyace.account;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Size;
 import com.mnyace.transaction.GoalAllocationItem;
@@ -23,6 +24,14 @@ public record UpdateAccountRequest(
 
         @Size(max = 30, message = "Color label must be at most 30 characters")
         String colorLabel,
+
+        // Omitted (Java null) leaves it as is; an explicit JSON null arrives as a NullNode and clears it.
+        // A JsonNode is the one way to tell the two apart without an extra library.
+        JsonNode accountSuffix,
+
+        // Replaces the whole list; omitted (null) leaves it as is.
+        @Size(max = 20, message = "Too many card numbers")
+        List<String> cardSuffixes,
 
         @Valid
         @Size(max = 50, message = "Too many goal allocations")

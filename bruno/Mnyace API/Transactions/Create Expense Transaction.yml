@@ -15,7 +15,9 @@ http:
         "categoryId": "cat-12",
         "accountId": "a985539e-e478-4e06-8fc7-9a01d32743e2",
         "amount": 919.19,
-        "notes": "Vijetha"
+        "notes": "Vijetha",
+        "importRef": "sms-9f2c1e",
+        "source": "SMS"
       }
   auth:
     type: bearer

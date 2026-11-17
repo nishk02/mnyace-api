@@ -19,5 +19,8 @@ public class ApiErrorCodes {
      */
     public static final String GOAL_ALLOCATION_SHORTFALL = "GOAL_ALLOCATION_SHORTFALL";
 
+    /** A transaction with this importRef already exists for the user; nothing was created. */
+    public static final String DUPLICATE_IMPORT = "DUPLICATE_IMPORT";
+
     public static final String DELETE_REQUIRES_CONFIRMATION = "DELETE_REQUIRES_CONFIRMATION";
 }

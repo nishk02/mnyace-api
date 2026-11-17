@@ -13,7 +13,9 @@ http:
         "name": "Axis Bank",
         "type": "BANK",
         "currentBalance": 35000.00,
-        "colorLabel": "#D81B60"
+        "colorLabel": "#D81B60",
+        "accountSuffix": "3388",
+        "cardSuffixes": ["8155"]
       }
   auth:
     type: bearer

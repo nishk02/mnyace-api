@@ -63,6 +63,13 @@ public class Transaction {
     @Column(name = "notes")
     private String notes;
 
+    @Column(name = "import_ref", updatable = false)
+    private String importRef;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, updatable = false)
+    private TransactionSource source = TransactionSource.MANUAL;
+
     @Column(name = "financial_year", nullable = false)
     private String financialYear;
 
