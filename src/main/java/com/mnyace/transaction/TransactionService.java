@@ -181,6 +181,10 @@ public class TransactionService {
         if (request.source() != null) {
             transaction.setSource(request.source());
         }
+        if (request.merchant() != null && !request.merchant().isBlank()) {
+            transaction.setMerchant(request.merchant().trim());
+            transaction.setMerchantKey(MerchantKey.of(request.merchant()));
+        }
 
         guardWithdrawalAllocation(account, request.type(), request.toGoalId(), request.amount(), request.goalAllocations());
 

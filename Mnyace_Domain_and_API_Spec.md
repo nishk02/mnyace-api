@@ -292,6 +292,7 @@ Derived from: Cash Flow screens (pages 30–36), Excel monthly sheets
 | `goalCreditApplied` | BigDecimal | *(added v1.5.0)* Nullable — only set for a TRANSFER with `toGoalId`. How much of `amount` actually landed on the goal's `currentProgress`, after BR-23's headroom clamp. Serialized on `TransactionResponse` — see BR-23. |
 | `notes` | String | Description, set at creation. Editable via `PUT` for all types except `SETTLEMENT` — see BR-11. |
 | `source` | Enum | `MANUAL` (default) or `SMS`: how the transaction was created. Set at creation, never edited. Returned on every transaction (BR-34). |
+| `merchant` | String, nullable | The counterparty an imported SMS named (max 100, trimmed, blank is null). Set by the app for SMS imports only; write-once and write-only, not returned and not editable (BR-34). |
 | `importRef` | String, nullable | Client-generated key (max 64) for an imported transaction. Unique per user; a repeat is refused (BR-34). Write-only: set at creation, not returned. |
 | `financialYear` | String | e.g. `FY24-25` — derived server-side from `date`, not user input. See "Two calendars" below. |
 | `month` | Integer | 1–12, where 1=April, 12=March — derived server-side. See "Two calendars" below. |
@@ -738,6 +739,8 @@ CREATE TABLE transactions (
     amount REAL NOT NULL CHECK(amount > 0),
     notes TEXT,
     import_ref TEXT,
+    merchant TEXT,
+    merchant_key TEXT,                               -- the merchant, normalised (BR-34)
     source TEXT NOT NULL DEFAULT 'MANUAL' CHECK(source IN ('MANUAL','SMS')),
     financial_year TEXT NOT NULL,
     month INTEGER NOT NULL CHECK(month BETWEEN 1 AND 12),
@@ -754,6 +757,7 @@ CREATE TABLE transactions (
 );
 
 CREATE UNIQUE INDEX idx_transactions_user_import_ref ON transactions(user_id, import_ref) WHERE import_ref IS NOT NULL;
+CREATE INDEX idx_transactions_user_merchant_key ON transactions(user_id, merchant_key) WHERE merchant_key IS NOT NULL;
 
 -- ============================================================
 -- TRANSACTION GOAL ALLOCATIONS (withdrawal ledger — v1.5.0, BR-19)
@@ -1460,9 +1464,12 @@ Three request shapes depending on the tab selected in the Add Entry form.
   "categoryId": "cat-12",
   "accountId": "uuid-maxis",
   "importRef": "9f2c…e1",
+  "merchant": "SWIGGY 1234",
   "source": "SMS"
 }
 ```
+`merchant` is optional: at most 100 characters (`400` beyond that), trimmed, and blank counts as absent. It is stored with a normalised key so the category the user picks can be offered again (see `GET /transactions/merchant-categories`); it is never returned and `PUT` cannot change it.
+
 `importRef` is at most 64 characters and unique per user: a repeat returns `409 DUPLICATE_IMPORT` (details carry the existing `transactionId`) and creates nothing, so re-reading an SMS is safe. `source` is `MANUAL` or `SMS`, `MANUAL` when omitted; any other value returns `400`.
 
 **Transfer withdrawing from a goal-linked account, exceeding free balance (v1.5.0 — see BR-19):**
@@ -1587,6 +1594,21 @@ Powers a year-based month picker on the Cash Flow screen — calendar lens only 
 `years` and each year's month list are both already `DESC` (most recent first) — no client-side sorting needed. The endpoint deliberately returns the full years+months structure in one response rather than accepting a `?year=` param and fetching per year: for a single-user personal app the total data volume is small, so one payload avoids a round trip every time the user switches year tabs. "Default to current year" is a frontend concern — the client already knows what year "today" is and doesn't need the backend to say so; if the current year genuinely has no transactions yet, it's simply absent from `years`, and the picker's default view is correctly an empty month grid.
 
 **`earliestTransactionDate` (added v1.5.0) — the shared back-navigation boundary for `from`/`to` requests:** a single `MIN(date)` across the user's transactions (`TransactionRepository.findEarliestDate`), `null` for a brand-new user with none yet. This exists specifically for the `from`/`to` query model on both `GET /transactions` and `GET /analytics/cashflow-summary` (see "Period filtering" above), which deliberately has no smart-skip navigation of its own — the frontend needs *some* signal for "how far back can the user go" before it starts requesting empty weeks. One shared fact serves both endpoints without duplication: `GET /analytics/cashflow-summary` has no data independent of the `transactions` table, so there's no separate "earliest date analytics has" to compute — it's definitionally the same value. The frontend's period-navigator fetches this once (cached, not refetched per navigation step) and uses it two ways: gating the back arrow directly (disable once the next `from`/`to` window would end before this date), and, for a week-list picker built per available month, truncating the week list for the earliest available month at this exact date rather than at the month's calendar start — `monthsByYear` only proves a month has *some* data, not that every week within it does.
+
+#### GET /transactions/merchant-categories
+The category the user most often gives each merchant, so the app can preselect a whole scan of imported SMS with one call (BR-34).
+
+**Query params (all optional):** `flowType` (`INCOME` or `EXPENSE`, as on `GET /transactions`: only transactions of that flow are counted) and `limit` (default 500, capped at 1000; merchants come most recently used first).
+```json
+{
+  "data": {
+    "merchantCategories": [
+      { "merchant": "SWIGGY", "merchantKey": "SWIGGY", "categoryId": "cat-12", "count": 14 }
+    ]
+  }
+}
+```
+`merchantKey` is what the app matches on; `merchant` is the most recently stored spelling, for display only. `count` is how many of the user's transactions chose `categoryId`. Only the signed-in user's own transactions are read.
 
 #### GET /transactions/{id}
 Response includes `goalAllocations` (v1.5.0), same shape as the list endpoint.
@@ -2392,6 +2414,19 @@ A user who has forgotten their password gets a 6-digit one-time code by email, t
 **`importRef` is unique per user.** It is a key the client makes up: the bank's reference number when the SMS carries one, otherwise a hash of the date, amount, card digits, merchant and the time the SMS arrived, so two genuine identical purchases differ while re-reading one SMS does not. A transaction that repeats a ref returns `409 DUPLICATE_IMPORT` with the existing transaction's id in `details`, and changes no balance and no goal. The check runs before anything is applied; a unique index backs it, so two simultaneous requests cannot both succeed (the loser answers `409` without the id). Blank counts as absent. Users are independent: the same ref is fine for two users. Deleting a transaction frees its ref, so the same SMS can be imported again afterwards.
 
 **`source` records how a transaction was created**, `MANUAL` (typed in, the default) or `SMS`. It is set at creation and not editable, is returned on every transaction, and exists so the app can mark imports and analytics can split them out. Balance adjustments the API creates itself are `MANUAL`.
+
+**`merchant` and merchant memory (extends the above).** An SMS import can send `merchant`, the counterparty the parser found. It is stored as given (trimmed) beside a normalised `merchantKey`, written once at creation; it is not returned, not editable, and not used for anything else. `notes` is deliberately not used, since the user can rewrite it at import time and later.
+
+**The normalisation rule, applied on write and expected from the app when it looks a merchant up:**
+1. Trim, then upper-case (locale-independent).
+2. Collapse each run of whitespace to one space.
+3. Remove every digit `0-9` and every one of these characters: `*` `#` `-` `_` `/` `.` `@`.
+4. Collapse whitespace runs again and trim.
+5. If nothing is left, there is no key: the row is stored but never learned from.
+
+So `Swiggy `, `SWIGGY 1234` and `swiggy*` all become `SWIGGY`, and `AMZN*Mktp 12/34 - IN` becomes `AMZNMKTP IN`. Other punctuation and non-ASCII letters stay.
+
+**What `GET /transactions/merchant-categories` returns.** The user's transactions that have a key, grouped by key. Per merchant the winning category is the one with the most transactions; a tie goes to the category touched most recently (`updatedAt`). It is read live from each transaction's current category, with no separate log, so a `PUT` that corrects a category changes what is learned and a deleted transaction stops counting. Inactive and internal categories (BR-17) are skipped: a merchant whose best category is inactive falls back to its next best, and is omitted when none is left. Merchants are ordered by most recent use, then capped by `limit`.
 
 ---
 
