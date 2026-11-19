@@ -22,6 +22,8 @@ CREATE TABLE transactions
     planned_amount_id   TEXT,
     goal_credit_applied REAL,
     import_ref          TEXT,
+    merchant            TEXT,
+    merchant_key        TEXT,
     source              TEXT        NOT NULL DEFAULT 'MANUAL' CHECK (source IN ('MANUAL', 'SMS')),
     created_at          TIMESTAMP   NOT NULL,
     updated_at          TIMESTAMP   NOT NULL,
@@ -34,3 +36,6 @@ CREATE INDEX idx_transactions_user_fy_month ON transactions (user_id, financial_
 CREATE INDEX idx_transactions_account ON transactions (account_id);
 -- A client-generated key for an imported transaction (e.g. from a bank SMS), so reading it twice creates it once
 CREATE UNIQUE INDEX idx_transactions_user_import_ref ON transactions (user_id, import_ref) WHERE import_ref IS NOT NULL;
+
+-- The merchant an imported SMS named, and its normalised form, so a category chosen once can be offered again
+CREATE INDEX idx_transactions_user_merchant_key ON transactions (user_id, merchant_key) WHERE merchant_key IS NOT NULL;

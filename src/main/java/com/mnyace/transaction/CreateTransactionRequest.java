@@ -43,6 +43,10 @@ public record CreateTransactionRequest(
         @Size(max = 64, message = "Import reference must be at most 64 characters")
         String importRef,
 
+        // The counterparty an imported SMS named; write-once and never returned. See BR-34.
+        @Size(max = 100, message = "Merchant must be at most 100 characters")
+        String merchant,
+
         // How the transaction was created; MANUAL when omitted.
         TransactionSource source
 ) {

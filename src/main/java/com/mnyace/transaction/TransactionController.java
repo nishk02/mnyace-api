@@ -19,6 +19,7 @@ import java.time.LocalDate;
 @RequiredArgsConstructor
 public class TransactionController extends BaseController {
     private final TransactionService transactionService;
+    private final MerchantCategoryService merchantCategoryService;
 
     @GetMapping
     public ResponseEntity<ApiResponse<TransactionListResponse>> getTransactions(
@@ -48,6 +49,14 @@ public class TransactionController extends BaseController {
 
         return ResponseEntity.ok(ApiResponse.success(
                 result.response(), "Transaction created successfully", result.warning(), result.info()));
+    }
+
+    @GetMapping("/merchant-categories")
+    public ResponseEntity<ApiResponse<MerchantCategoryResponse.Listing>> getMerchantCategories(
+            @RequestParam(required = false) FlowType flowType,
+            @RequestParam(required = false) Integer limit) {
+        return ResponseEntity.ok(ApiResponse.success(
+                merchantCategoryService.getMerchantCategories(getCurrentUserId(), flowType, limit)));
     }
 
     @GetMapping("/{id}")

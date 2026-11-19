@@ -66,6 +66,12 @@ public class Transaction {
     @Column(name = "import_ref", updatable = false)
     private String importRef;
 
+    @Column(updatable = false)
+    private String merchant;
+
+    @Column(name = "merchant_key", updatable = false)
+    private String merchantKey;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, updatable = false)
     private TransactionSource source = TransactionSource.MANUAL;
