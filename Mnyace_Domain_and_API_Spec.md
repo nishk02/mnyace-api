@@ -396,7 +396,7 @@ Derived from: Goals screens (pages 26–29), Excel Goals sheet
 | `currentProgress` | BigDecimal | Moves in both directions — increases on arrival (BR-07) or an explicit allocation increase, decreases on withdrawal (BR-07/BR-19). Bounded between 0 and `targetAmount`. |
 | `monthlySavingsRequired` | BigDecimal | Serialized as `plannedMonthlySavings` in API responses. Computed: `targetAmount / totalMonths` (startDate to endDate), ignoring `currentProgress` entirely — a frozen plan, re-baselined only when `targetAmount` or `endDate` change via PUT. See BR-21. |
 | `displayOrder` | Integer | User can drag to reorder |
-| `status` | String | `IN_PROGRESS` or `COMPLETED` in practice — see BR-22. `UPCOMING`/`PAUSED` remain in the DB `CHECK` constraint (V5 migration) but the application never sets either; no automatic transitions — see §11. A goal not yet started is still `IN_PROGRESS` — see the computed `isUpcoming` flag below and BR-24. |
+| `status` | String | `IN_PROGRESS` or `COMPLETED` in practice — see BR-22. `UPCOMING`/`PAUSED` remain in the DB `CHECK` constraint (baseline migration) but the application never sets either; no automatic transitions — see §11. A goal not yet started is still `IN_PROGRESS` — see the computed `isUpcoming` flag below and BR-24. |
 | `isActive` | Boolean | Soft delete |
 | `createdAt` | LocalDateTime | |
 | `updatedAt` | LocalDateTime | Added: goal fields (targetAmount, endDate, status) are editable — audit timestamp warranted. |
@@ -670,7 +670,7 @@ CREATE UNIQUE INDEX idx_accounts_one_cash_per_user ON accounts(user_id) WHERE ty
 CREATE UNIQUE INDEX idx_accounts_user_name ON accounts(user_id, name) WHERE bank_code IS NULL OR custom_bank = 1;
 
 -- ============================================================
--- BANKS (seeded catalog; changes ship as migrations, there is no admin endpoint)
+-- BANKS (seeded catalog; rows come from the repeatable R__banks.sql, there is no admin endpoint)
 -- ============================================================
 CREATE TABLE banks (
     code TEXT PRIMARY KEY CHECK(length(code) BETWEEN 2 AND 10 AND code NOT GLOB '*[^A-Z0-9]*'),
@@ -2010,7 +2010,7 @@ The service collects the `MonthSummary` data + goal progress + category breakdow
 
 ## 8. Seed Data
 
-Applied via Flyway migration `V1__seed_categories.sql` on first launch.
+Applied by the baseline Flyway migration `V1__baseline.sql` on first launch. The bank catalog rows are separate: the repeatable `R__banks.sql` upserts them on every start.
 
 ```sql
 INSERT INTO categories (id, name, icon, is_system, is_active, is_internal, display_order) VALUES
@@ -2480,7 +2480,7 @@ So `Swiggy `, `SWIGGY 1234` and `swiggy*` all become `SWIGGY`, and `AMZN*Mktp 12
 
 **Why:** the app shows an account as its bank plus the last digits (`BOI-2864`) and colours it by bank, so the account records which bank it is, picked from a list the server owns instead of free text that every client spells differently.
 
-**The catalog** is the `banks` table, seeded by migration with the major Indian banks, ordered by how common they are. It is changed by a new migration, never by an endpoint. A bank made inactive disappears from `GET /banks` and cannot be picked again, but stays on the accounts that already use it, and an unchanged resend of its code on such an account is accepted. Codes are 2 to 10 upper-case letters or digits (`^[A-Z0-9]{2,10}$`); a lowercase code is `400`, not corrected.
+**The catalog** is the `banks` table, seeded by migration with the major Indian banks, ordered by how common they are. It is changed by editing the repeatable `R__banks.sql` (a new bank is a new row, retiring one sets its `is_active` to `0`), never by an endpoint. A bank made inactive disappears from `GET /banks` and cannot be picked again, but stays on the accounts that already use it, and an unchanged resend of its code on such an account is accepted. Codes are 2 to 10 upper-case letters or digits (`^[A-Z0-9]{2,10}$`); a lowercase code is `400`, not corrected.
 
 **Two ways to set a `BANK` account's bank**, on `POST` and `PUT /accounts`:
 - **Listed bank:** send `bankCode` alone. It must be in the catalog and active (`400` otherwise). The server sets `name` from the catalog and ignores any `name` sent. Because that name is shared, two accounts at the same listed bank are allowed (the digits tell them apart).
