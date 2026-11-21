@@ -1,0 +1,31 @@
+info:
+  name: Create Account - Other Bank
+  type: http
+  seq: 7
+
+http:
+  method: POST
+  url: "{{BASE_URL}}/api/accounts"
+  body:
+    type: json
+    data: |-
+      {
+        "type": "BANK",
+        "customBank": true,
+        "bankCode": "LCOOP",
+        "name": "Local Co-operative Bank",
+        "currentBalance": 12000.00,
+        "colorKey": "pink",
+        "accountSuffix": "4410",
+        "cardSuffixes": []
+      }
+  auth:
+    type: bearer
+    token: "{{AUTH_TOKEN}}"
+
+settings:
+  encodeUrl: true
+  timeout: 0
+  followRedirects: true
+  maxRedirects: 5
+  forwardAuthorizationHeader: true

@@ -82,7 +82,7 @@ class InputBoundsTest extends AuthIntegrationTestBase {
 
     private HttpResponse<String> createAccount(String name, String balance) {
         return post("/api/accounts",
-                "{\"name\":\"" + name + "\",\"type\":\"BANK\",\"currentBalance\":" + balance + "}",
+                "{\"name\":\"" + name + "\",\"type\":\"BANK\",\"accountSuffix\":\"" + freshDigits() + "\",\"currentBalance\":" + balance + "}",
                 "Authorization", auth);
     }
 }

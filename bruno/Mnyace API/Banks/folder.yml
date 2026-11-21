@@ -1,0 +1,7 @@
+info:
+  name: Banks
+  type: folder
+  seq: 10
+
+request:
+  auth: inherit

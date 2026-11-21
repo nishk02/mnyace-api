@@ -24,13 +24,17 @@ public record GoalResponse(
         boolean isBehindSchedule,
         int displayOrder
 ) {
-    public record AccountSummary(String id, String name, String colorLabel) {}
+    public record AccountSummary(String id, String name, String colorKey, String colorLight, String colorDark, String bankCode, String accountSuffix) {}
 
     public static GoalResponse from(Goal goal, BigDecimal creditedThisMonth) {
         AccountSummary account = new AccountSummary(
                 goal.getAccount().getId(),
                 goal.getAccount().getName(),
-                goal.getAccount().getColorLabel());
+                goal.getAccount().getColorKey(),
+                goal.getAccount().getColorLight(),
+                goal.getAccount().getColorDark(),
+                goal.getAccount().getBankCode(),
+                goal.getAccount().getAccountSuffix());
 
         final BigDecimal progressPercentage = calculateProgressPercentage(goal);
 

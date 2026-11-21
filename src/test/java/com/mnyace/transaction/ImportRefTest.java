@@ -134,7 +134,7 @@ class ImportRefTest extends AuthIntegrationTestBase {
 
     private String newBankAccount(String authorization) {
         HttpResponse<String> response = post("/api/accounts",
-                "{\"name\":\"imp-" + UUID.randomUUID().toString().substring(0, 8) + "\",\"type\":\"BANK\",\"currentBalance\":1000}",
+                "{\"name\":\"imp-" + UUID.randomUUID().toString().substring(0, 8) + "\",\"type\":\"BANK\",\"accountSuffix\":\"" + freshDigits() + "\",\"currentBalance\":1000}",
                 "Authorization", authorization);
         assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
         return json(response).path("data").path("id").asText();

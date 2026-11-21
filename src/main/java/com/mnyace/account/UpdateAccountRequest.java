@@ -22,8 +22,14 @@ public record UpdateAccountRequest(
         @Digits(integer = 13, fraction = 2, message = "Amount is too large or has more than 2 decimal places")
         BigDecimal currentBalance,
 
-        @Size(max = 30, message = "Color label must be at most 30 characters")
-        String colorLabel,
+        // a key from the account palette (GET /accounts/colors); not accepted for a listed bank, whose colour is the catalog's
+        @Size(max = 30, message = "Color key must be at most 30 characters")
+        String colorKey,
+
+        // Omitted leaves the bank as is; BANK only
+        String bankCode,
+
+        Boolean customBank,
 
         // Omitted (Java null) leaves it as is; an explicit JSON null arrives as a NullNode and clears it.
         // A JsonNode is the one way to tell the two apart without an extra library.

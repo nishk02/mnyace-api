@@ -46,7 +46,7 @@ class OwnershipTest extends AuthIntegrationTestBase {
         }
 
         accountA = idOf(post("/api/accounts",
-                "{\"name\":\"" + MARKER + "-account\",\"type\":\"BANK\",\"currentBalance\":1000}", "Authorization", authA));
+                "{\"name\":\"" + MARKER + "-account\",\"type\":\"BANK\",\"accountSuffix\":\"" + freshDigits() + "\",\"currentBalance\":1000}", "Authorization", authA));
         goalA = idOf(post("/api/goals",
                 "{\"name\":\"" + MARKER + "-goal\",\"targetAmount\":5000,\"accountId\":\"" + accountA
                         + "\",\"startDate\":\"" + today + "\",\"endDate\":\"" + today.plusYears(1) + "\"}", "Authorization", authA));
@@ -131,7 +131,7 @@ class OwnershipTest extends AuthIntegrationTestBase {
     void transaction_otherUserCannotBookAgainstSomeoneElsesAccountOrGoal() {
         setUpUsersAndData();
         String accountB = idOf(post("/api/accounts",
-                "{\"name\":\"b-account\",\"type\":\"BANK\",\"currentBalance\":500}", "Authorization", authB));
+                "{\"name\":\"b-account\",\"type\":\"BANK\",\"accountSuffix\":\"" + freshDigits() + "\",\"currentBalance\":500}", "Authorization", authB));
 
         assertThat(post("/api/transactions", expense(accountA, null, null), "Authorization", authB).statusCode())
                 .isEqualTo(404);

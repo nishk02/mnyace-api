@@ -65,7 +65,7 @@ class CashAccountTest extends AuthIntegrationTestBase {
     void theCashType_cannotBeChangedAwayFromOrOntoAnotherAccount() {
         String cashId = cashAccount().path("id").asText();
         String bankId = idOf(post("/api/accounts",
-                "{\"name\":\"Cash-test-bank\",\"type\":\"BANK\",\"currentBalance\":0}", "Authorization", auth));
+                "{\"name\":\"Cash-test-bank\",\"type\":\"BANK\",\"accountSuffix\":\"" + freshDigits() + "\",\"currentBalance\":0}", "Authorization", auth));
 
         assertThat(put("/api/accounts/" + cashId, "{\"type\":\"BANK\"}", "Authorization", auth).statusCode())
                 .isEqualTo(400);
@@ -80,7 +80,7 @@ class CashAccountTest extends AuthIntegrationTestBase {
 
         assertThat(put("/api/accounts/" + id, "{\"name\":\"Pocket money\"}", "Authorization", auth).statusCode())
                 .isEqualTo(400);
-        assertThat(put("/api/accounts/" + id, "{\"colorLabel\":\"blue\"}", "Authorization", auth).statusCode())
+        assertThat(put("/api/accounts/" + id, "{\"colorKey\":\"blue\"}", "Authorization", auth).statusCode())
                 .isEqualTo(400);
         assertThat(cashAccount().path("name").asText()).isEqualTo("Cash");
 

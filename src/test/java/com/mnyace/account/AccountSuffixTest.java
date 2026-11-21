@@ -28,13 +28,30 @@ class AccountSuffixTest extends AuthIntegrationTestBase {
     }
 
     @Test
-    void anAccountWithoutDigits_returnsNullAndAnEmptyList() {
+    void anAccountWithoutCards_returnsAnEmptyList() {
         String id = bank("");
 
         JsonNode account = account(id);
-        assertThat(account.path("accountSuffix").isNull()).isTrue();
+        assertThat(account.path("accountSuffix").asText()).isNotBlank();
         assertThat(account.path("cardSuffixes").isArray()).isTrue();
         assertThat(account.path("cardSuffixes")).isEmpty();
+    }
+
+    @Test
+    void aBankAccount_needsItsAccountSuffix_onCreate() {
+        for (String body : List.of(
+                "{\"name\":\"nodigits\",\"type\":\"BANK\",\"currentBalance\":0}",
+                "{\"name\":\"nodigits\",\"type\":\"BANK\",\"currentBalance\":0,\"accountSuffix\":null}",
+                "{\"name\":\"nodigits\",\"type\":\"BANK\",\"currentBalance\":0,\"accountSuffix\":\"\"}",
+                "{\"name\":\"nodigits\",\"type\":\"BANK\",\"currentBalance\":0,\"accountSuffix\":\"  \"}")) {
+            HttpResponse<String> response = post("/api/accounts", body, "Authorization", auth);
+            assertThat(response.statusCode()).as(body).isEqualTo(400);
+            assertThat(json(response).path("error").path("code").asText()).isEqualTo("VALIDATION_ERROR");
+            assertThat(json(response).path("error").path("message").asText()).contains("accountSuffix is required");
+        }
+        // a wallet has no digits to ask for
+        assertThat(idOf(post("/api/accounts", "{\"name\":\"w-nodigits\",\"type\":\"WALLET\",\"currentBalance\":0}",
+                "Authorization", auth))).isNotBlank();
     }
 
     @Test
@@ -97,16 +114,21 @@ class AccountSuffixTest extends AuthIntegrationTestBase {
     }
 
     @Test
-    void anEdit_leavesOmittedFieldsAlone_clearsOnNull_andReplacesTheCardList() {
+    void anEdit_leavesOmittedFieldsAlone_refusesToClearTheSuffix_andReplacesTheCardList() {
         String id = idOf(create("BANK", ",\"accountSuffix\":\"2468\",\"cardSuffixes\":[\"1357\"]"));
 
-        put("/api/accounts/" + id, "{\"colorLabel\":\"blue\"}", "Authorization", auth);
+        put("/api/accounts/" + id, "{\"colorKey\":\"blue\"}", "Authorization", auth);
         assertThat(account(id).path("accountSuffix").asText()).isEqualTo("2468");
         assertThat(account(id).path("cardSuffixes")).hasSize(1);
 
-        put("/api/accounts/" + id, "{\"accountSuffix\":null}", "Authorization", auth);
-        assertThat(account(id).path("accountSuffix").isNull()).isTrue();
+        HttpResponse<String> cleared = put("/api/accounts/" + id, "{\"accountSuffix\":null}", "Authorization", auth);
+        assertThat(cleared.statusCode()).isEqualTo(400);
+        assertThat(json(cleared).path("error").path("message").asText()).contains("accountSuffix is required");
+        assertThat(account(id).path("accountSuffix").asText()).isEqualTo("2468");
         assertThat(account(id).path("cardSuffixes")).hasSize(1);
+
+        put("/api/accounts/" + id, "{\"accountSuffix\":\"2469\"}", "Authorization", auth);
+        assertThat(account(id).path("accountSuffix").asText()).isEqualTo("2469");
 
         put("/api/accounts/" + id, "{\"cardSuffixes\":[\"1111\",\"2222\"]}", "Authorization", auth);
         assertThat(account(id).path("cardSuffixes")).hasSize(2);
@@ -144,9 +166,12 @@ class AccountSuffixTest extends AuthIntegrationTestBase {
     }
 
     private HttpResponse<String> create(String type, String extra) {
+        // a BANK account must carry digits, so give it some unless the test supplies its own
+        String digits = "BANK".equals(type) && !extra.contains("accountSuffix")
+                ? ",\"accountSuffix\":\"" + freshDigits() + "\"" : "";
         return post("/api/accounts",
                 "{\"name\":\"t-" + UUID.randomUUID().toString().substring(0, 8) + "\",\"type\":\"" + type + "\""
-                        + (extra.contains("currentBalance") ? "" : ",\"currentBalance\":0") + extra + "}",
+                        + (extra.contains("currentBalance") ? "" : ",\"currentBalance\":0") + digits + extra + "}",
                 "Authorization", auth);
     }
 
