@@ -124,7 +124,7 @@ class AccountDeletionTest extends AuthIntegrationTestBase {
     /** One of every kind of data a user can own; returns the ids of their transactions. */
     private List<String> seedEverything(String email, String auth) {
         String bank = idOf(post("/api/accounts",
-                "{\"name\":\"bank\",\"type\":\"BANK\",\"currentBalance\":1000}", "Authorization", auth));
+                "{\"name\":\"bank\",\"type\":\"BANK\",\"accountSuffix\":\"" + freshDigits() + "\",\"currentBalance\":1000}", "Authorization", auth));
         String cash = idOf(post("/api/accounts",
                 "{\"name\":\"wallet\",\"type\":\"WALLET\",\"currentBalance\":50}", "Authorization", auth));
         String goal = idOf(post("/api/goals",
@@ -167,7 +167,7 @@ class AccountDeletionTest extends AuthIntegrationTestBase {
     }
 
     private void seedAccountAndGoal(String auth) {
-        idOf(post("/api/accounts", "{\"name\":\"keep\",\"type\":\"BANK\",\"currentBalance\":10}", "Authorization", auth));
+        idOf(post("/api/accounts", "{\"name\":\"keep\",\"type\":\"BANK\",\"accountSuffix\":\"" + freshDigits() + "\",\"currentBalance\":10}", "Authorization", auth));
     }
 
     /** Scans every table, so a table added later that holds user data without being cleared fails this test. */

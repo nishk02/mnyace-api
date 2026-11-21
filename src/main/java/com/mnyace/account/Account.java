@@ -1,11 +1,14 @@
 package com.mnyace.account;
 
 import com.mnyace.auth.User;
+import com.mnyace.bank.Bank;
 
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.NotFound;
+import org.hibernate.annotations.NotFoundAction;
 import org.hibernate.annotations.UuidGenerator;
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.annotation.LastModifiedDate;
@@ -46,11 +49,23 @@ public class Account {
     @Column(nullable = false)
     private String currency = "INR";
 
-    @Column(name = "color_label")
-    private String colorLabel;
+    @Column(name = "color_key")
+    private String colorKey;
 
     @Column(name = "account_suffix")
     private String accountSuffix;
+
+    @Column(name = "bank_code")
+    private String bankCode;
+
+    // read-only view of the catalog row, so a listed bank's colour follows the catalog; a custom code has none
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "bank_code", referencedColumnName = "code", insertable = false, updatable = false)
+    @NotFound(action = NotFoundAction.IGNORE)
+    private Bank bank;
+
+    @Column(name = "custom_bank", nullable = false, columnDefinition = "INTEGER")
+    private boolean customBank = false;
 
     @Convert(converter = CardSuffixesConverter.class)
     @Column(name = "card_suffixes", nullable = false)
@@ -69,4 +84,14 @@ public class Account {
     @LastModifiedDate
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /** A listed bank's colour on a white page, from the catalog so it follows it; null for any other account. */
+    public String getColorLight() {
+        return !customBank && bank != null ? bank.getColorLight() : null;
+    }
+
+    /** A listed bank's colour on a #121212 page; null for any other account. */
+    public String getColorDark() {
+        return !customBank && bank != null ? bank.getColorDark() : null;
+    }
 }

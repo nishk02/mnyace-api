@@ -10,7 +10,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 public record CreateAccountRequest(
-        @NotBlank(message = "Account name is required")
+        // required unless a listed bank supplies it; AccountBankResolver enforces that
         @Size(max = 100, message = "Name must be at most 100 characters")
         String name,
 
@@ -22,10 +22,16 @@ public record CreateAccountRequest(
         @Digits(integer = 13, fraction = 2, message = "Amount is too large or has more than 2 decimal places")
         BigDecimal currentBalance,
 
-        @Size(max = 30, message = "Color label must be at most 30 characters")
-        String colorLabel,
+        // a key from the account palette (GET /accounts/colors); not accepted for a listed bank, whose colour is the catalog's
+        @Size(max = 30, message = "Color key must be at most 30 characters")
+        String colorKey,
 
-        // BANK only; digits are checked by AccountSuffixes so create and update answer alike
+        // BANK only; a catalog code, or the user's own code together with customBank
+        String bankCode,
+
+        Boolean customBank,
+
+        // required for BANK; digits are checked by AccountSuffixes so create and update answer alike
         String accountSuffix,
 
         @Size(max = 20, message = "Too many card numbers")

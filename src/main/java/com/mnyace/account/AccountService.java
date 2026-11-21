@@ -25,6 +25,7 @@ public class AccountService {
     private final TransactionService transactionService;
     private final GoalRepository goalRepository;
     private final GoalAllocationService goalAllocationService;
+    private final AccountBankResolver bankResolver;
 
     public List<AccountResponse> getAccounts(String userId) {
         return mapAccounts(accountRepository.findByUserIdAndActiveTrue(userId), userId);
@@ -44,23 +45,35 @@ public class AccountService {
     public AccountResponse createAccount(String userId, CreateAccountRequest request) {
         User user = getUser(userId);
 
-        if (accountRepository.existsByUserIdAndNameIgnoreCase(userId, request.name())) {
-            throw ApiException.conflict("An account name '" + request.name() + "' already exists");
+        AccountBankResolver.Resolved bank = bankResolver.resolve(
+                request.type(), request.bankCode(), request.customBank(), request.name(), null);
+        String name = bank.name() != null ? bank.name() : request.name();
+        if (name == null || name.isBlank()) {
+            throw ApiException.badRequest("VALIDATION_ERROR", "Account name is required", null);
+        }
+        // a listed bank's name is shared by design, so a second account at the same bank is allowed
+        if (!bank.listed() && accountRepository.existsByUserIdAndNameIgnoreCase(userId, name)) {
+            throw ApiException.conflict("An account name '" + name + "' already exists");
         }
 
+        if ("BANK".equals(request.type()) && (request.accountSuffix() == null || request.accountSuffix().isBlank())) {
+            throw ApiException.badRequest("VALIDATION_ERROR", "accountSuffix is required for a BANK account", null);
+        }
         List<String> cardSuffixes = request.cardSuffixes() != null ? request.cardSuffixes() : List.of();
         AccountSuffixes.validate(request.type(), request.accountSuffix(), cardSuffixes, otherActiveAccounts(userId, null));
 
         Account account = new Account();
 
         account.setUser(user);
-        account.setName(request.name());
+        account.setName(name);
         account.setType(request.type());
+        account.setBankCode(bank.bankCode());
+        account.setCustomBank(bank.customBank());
         account.setAccountSuffix(request.accountSuffix());
         account.setCardSuffixes(List.copyOf(cardSuffixes));
         account.setCurrentBalance(request.currentBalance() != null ? request.currentBalance() : BigDecimal.ZERO);
         account.setCurrency("INR");
-        account.setColorLabel(request.colorLabel());
+        account.setColorKey(colorKeyFor(bank, request.colorKey(), null, otherActiveAccounts(userId, null)));
 
         Account savedAccount = accountRepository.save(account);
 
@@ -79,6 +92,7 @@ public class AccountService {
         account.setUser(user);
         account.setName(Account.CASH_NAME);
         account.setType(Account.CASH_TYPE);
+        account.setColorKey(AccountPalette.CASH_KEY);
         accountRepository.save(account);
     }
 
@@ -98,25 +112,40 @@ public class AccountService {
             throw ApiException.badRequest("The Cash account can only have its balance edited.");
         }
 
-        if (request.name() != null
-                && !request.name().equalsIgnoreCase(account.getName())
-                && accountRepository.existsByUserIdAndNameIgnoreCase(userId, request.name())
+        String newType = request.type() != null ? request.type() : account.getType();
+        AccountBankResolver.Resolved bank = bankResolver.resolve(
+                newType, request.bankCode(), request.customBank(), request.name(), account);
+        // a listed bank keeps the catalog's name; any other account may rename itself
+        String newName = bank.listed() ? bank.name() : (bank.name() != null ? bank.name() : request.name());
+
+        if (newName != null
+                && !bank.listed()
+                && !newName.equalsIgnoreCase(account.getName())
+                && accountRepository.existsByUserIdAndNameIgnoreCase(userId, newName)
         ) {
-            throw ApiException.conflict("An account named '" + request.name() + "' already exists");
+            throw ApiException.conflict("An account named '" + newName + "' already exists");
         }
 
+        String newColorKey = colorKeyFor(bank, request.colorKey(), account.getColorKey(),
+                otherActiveAccounts(userId, account.getId()));
+
+        // A BANK account always keeps its digits: omitting them is fine, clearing them is not.
+        if ("BANK".equals(newType) && request.accountSuffix() != null && request.accountSuffix().isNull()) {
+            throw ApiException.badRequest("VALIDATION_ERROR", "accountSuffix is required for a BANK account", null);
+        }
         // Checked before any field is touched: the lookup below would auto-flush a half-changed account into the
         // BANK-only constraint and answer 500 instead of 400.
         String newSuffix = resolveAccountSuffix(request.accountSuffix(), account.getAccountSuffix());
         List<String> newCards = request.cardSuffixes() != null ? request.cardSuffixes() : account.getCardSuffixes();
-        AccountSuffixes.validate(request.type() != null ? request.type() : account.getType(), newSuffix, newCards,
-                otherActiveAccounts(userId, account.getId()));
+        AccountSuffixes.validate(newType, newSuffix, newCards, otherActiveAccounts(userId, account.getId()));
 
         BigDecimal oldBalance = account.getCurrentBalance();
 
-        if (request.name() != null) {
-            account.setName(request.name());
+        if (newName != null) {
+            account.setName(newName);
         }
+        account.setBankCode(bank.bankCode());
+        account.setCustomBank(bank.customBank());
 
         if (request.type() != null) {
             if (!request.type().equals(account.getType())
@@ -126,9 +155,7 @@ public class AccountService {
             account.setType(request.type());
         }
 
-        if (request.colorLabel() != null) {
-            account.setColorLabel(request.colorLabel());
-        }
+        account.setColorKey(newColorKey);
 
         account.setAccountSuffix(newSuffix);
         account.setCardSuffixes(List.copyOf(newCards));
@@ -222,6 +249,34 @@ public class AccountService {
         accountRepository.save(account);
     }
 
+    /**
+     * The colour key an account ends up with. A listed bank takes its colour from the catalog, so it holds no key and
+     * refuses one; any other account picks from the palette, omitting the key keeps the stored one, and an account
+     * with none is given the palette colour the user's other accounts use least.
+     */
+    private String colorKeyFor(AccountBankResolver.Resolved bank, String requested, String stored, List<Account> others) {
+        if (bank.listed()) {
+            if (requested != null) {
+                throw ApiException.badRequest("VALIDATION_ERROR",
+                        "colorKey is not accepted for a bank from the list; its colour comes from the list", null);
+            }
+            return null;
+        }
+        if (requested != null && !AccountPalette.contains(requested)) {
+            throw ApiException.badRequest("VALIDATION_ERROR", "colorKey is not one of the account colours", null);
+        }
+        String key = requested != null ? requested : stored;
+        return key != null ? key : leastUsedColour(others);
+    }
+
+    /** An account left without a colour gets the palette colour the user's other accounts use least. */
+    private String leastUsedColour(List<Account> others) {
+        return AccountPalette.keys().stream()
+                .min(java.util.Comparator.comparingLong(
+                        key -> others.stream().filter(a -> key.equals(a.getColorKey())).count()))
+                .orElseThrow();
+    }
+
     /** Omitted leaves the stored value, an explicit null clears it, text replaces it. */
     private String resolveAccountSuffix(JsonNode requested, String stored) {
         if (requested == null) {
@@ -268,6 +323,8 @@ public class AccountService {
     private boolean changesAnythingButBalance(Account account, UpdateAccountRequest request) {
         return (request.name() != null && !request.name().equals(account.getName()))
                 || (request.type() != null && !request.type().equals(account.getType()))
-                || (request.colorLabel() != null && !request.colorLabel().equals(account.getColorLabel()));
+                || (request.colorKey() != null && !request.colorKey().equals(account.getColorKey()))
+                || request.bankCode() != null
+                || Boolean.TRUE.equals(request.customBank());
     }
 }

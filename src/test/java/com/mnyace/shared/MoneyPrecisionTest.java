@@ -77,7 +77,7 @@ class MoneyPrecisionTest extends AuthIntegrationTestBase {
     void api_reportsTenPaisePlusTwentyPaiseAsExactlyThirtyPaise() {
         String auth = "Bearer " + accessTokenOf(signInAdmin("X-Forwarded-For", freshIp()));
         String today = com.mnyace.shared.util.AppClock.today().toString();
-        String accountId = json(post("/api/accounts", "{\"name\":\"Pennies\",\"type\":\"BANK\",\"currentBalance\":0}",
+        String accountId = json(post("/api/accounts", "{\"name\":\"Pennies\",\"type\":\"BANK\",\"accountSuffix\":\"" + freshDigits() + "\",\"currentBalance\":0}",
                 "Authorization", auth)).path("data").path("id").asText();
         for (String amount : List.of("0.10", "0.20")) {
             post("/api/transactions", "{\"date\":\"" + today + "\",\"type\":\"INCOME\",\"categoryId\":\"cat-03\","
@@ -97,7 +97,7 @@ class MoneyPrecisionTest extends AuthIntegrationTestBase {
     @Test
     void api_rejectsAmountsWithMoreThanTwoDecimals() {
         String auth = "Bearer " + accessTokenOf(signInAdmin("X-Forwarded-For", freshIp()));
-        String accountId = json(post("/api/accounts", "{\"name\":\"Strict\",\"type\":\"BANK\",\"currentBalance\":0}",
+        String accountId = json(post("/api/accounts", "{\"name\":\"Strict\",\"type\":\"BANK\",\"accountSuffix\":\"" + freshDigits() + "\",\"currentBalance\":0}",
                 "Authorization", auth)).path("data").path("id").asText();
         String today = com.mnyace.shared.util.AppClock.today().toString();
 

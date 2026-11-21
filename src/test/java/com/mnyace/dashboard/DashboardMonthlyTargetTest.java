@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,6 +55,7 @@ class DashboardMonthlyTargetTest {
         account.setId("acc-1");
         account.setName("Main");
         account.setCurrentBalance(new BigDecimal("50000"));
+        account.setCreatedAt(LocalDateTime.now());
         when(accounts.findByUserIdAndActiveTrue(USER_ID)).thenReturn(List.of(account));
 
         when(transactions.sumByUserIdAndTypesAndMonth(anyString(), any(), anyInt(), anyInt())).thenReturn(BigDecimal.ZERO);

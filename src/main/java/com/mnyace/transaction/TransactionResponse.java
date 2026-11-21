@@ -26,7 +26,7 @@ public record TransactionResponse(
         List<GoalAllocationSummary> goalAllocations
 ) {
     public record CategorySummary(String id, String name, String icon) {}
-    public record AccountSummary(String id, String name, String colorLabel) {}
+    public record AccountSummary(String id, String name, String colorKey, String colorLight, String colorDark, String bankCode, String accountSuffix) {}
     public record GoalAllocationSummary(String goalId, String goalName, BigDecimal amount) {}
 
     public static TransactionResponse from(Transaction transaction, List<TransactionGoalAllocation> allocations) {
@@ -40,13 +40,21 @@ public record TransactionResponse(
         AccountSummary account = new AccountSummary(
                 transaction.getAccount().getId(),
                 transaction.getAccount().getName(),
-                transaction.getAccount().getColorLabel());
+                transaction.getAccount().getColorKey(),
+                transaction.getAccount().getColorLight(),
+                transaction.getAccount().getColorDark(),
+                transaction.getAccount().getBankCode(),
+                transaction.getAccount().getAccountSuffix());
 
         AccountSummary toAccount = transaction.getToAccount() != null
                 ? new AccountSummary(
                         transaction.getToAccount().getId(),
                         transaction.getToAccount().getName(),
-                        transaction.getToAccount().getColorLabel())
+                        transaction.getToAccount().getColorKey(),
+                        transaction.getToAccount().getColorLight(),
+                        transaction.getToAccount().getColorDark(),
+                        transaction.getToAccount().getBankCode(),
+                        transaction.getToAccount().getAccountSuffix())
                 : null;
 
         String displayAmount = buildDisplayAmount(transaction.getType(), transaction.getAmount());

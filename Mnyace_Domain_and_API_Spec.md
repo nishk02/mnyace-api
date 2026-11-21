@@ -215,16 +215,19 @@ Derived from: Add Account screen (page 38), Accounts list (page 39), Excel Accou
 |---|---|---|
 | `id` | UUID | Primary key |
 | `userId` | UUID | FK to User |
-| `name` | String | e.g. "MAXIS Bank", "India Bank" |
+| `name` | String | e.g. "MAXIS Bank", "India Bank". For a listed bank the server sets it from the catalog (BR-35) |
 | `type` | Enum | `CASH`, `BANK`, `WALLET`. Users create only `BANK` and `WALLET` accounts; the one `CASH` account is seeded (BR-32) |
 | `currentBalance` | BigDecimal | Source of truth — updated with every transaction |
 | `currency` | String | Default `INR` |
-| `colorLabel` | String | Hex colour code for UI display |
-| `accountSuffix` | String, nullable | Last 3 or 4 digits of the bank account, digits only. `BANK` only (BR-33) |
+| `colorKey` | String, nullable | One of the app's ten colour names (BR-36), for any account that is not at a listed bank: `WALLET`, `BANK` with `customBank`, and `CASH` (fixed to `green`). Null for an account at a listed bank. Never free text |
+| `colorLight`, `colorDark` | String, nullable | Response-only: a listed bank's colour as `#RRGGBB`, for text on a white page and on a `#121212` page, read from the catalog so a change reaches existing accounts. Null for every other account (BR-36) |
+| `bankCode` | String, nullable | The account's bank: a code from the bank catalog, or the user's own code when `customBank` is set. `BANK` only; null on `CASH` and `WALLET`, and on any account created before the catalog existed (BR-35) |
+| `customBank` | Boolean | `true` when the user entered the bank themselves instead of picking it from the catalog. Stored so a code added to the catalog later is never mistaken for a listed bank. `false` unless `bankCode` is set (BR-35) |
+| `accountSuffix` | String, nullable | Last 3 or 4 digits of the bank account, digits only. Required for a new `BANK` account; `BANK` only (BR-33) |
 | `cardSuffixes` | List of String | Last 4 digits of each debit card, up to 5, no repeats. Empty by default. `BANK` only (BR-33) |
 | `displayOrder` | Integer | For UI ordering |
 | `isActive` | Boolean | Soft delete flag |
-| `createdAt` | LocalDateTime | |
+| `createdAt` | LocalDateTime | The setup date BR-13 compares against. Returned on every account response as an ISO-8601 instant (e.g. `2026-11-22T10:15:00.123Z`); never client-set and never changed by an edit. The app uses it as the earliest date a bank message may be imported for the account, since `currentBalance` is a snapshot taken at setup |
 | `goalLinked` | Boolean | Response-only, not a stored column — `true` when the account backs at least one active, non-completed goal (same rule as BR-12's protected-account check). Drives the piggy-bank icon on the Accounts screen. |
 
 **Key design decision:** `currentBalance` is kept in sync in real-time as transactions are posted. It is never recomputed from history. This makes balance reads instant regardless of how many transactions exist.
@@ -646,20 +649,37 @@ CREATE TABLE accounts (
     type TEXT NOT NULL CHECK(type IN ('CASH','BANK','WALLET')),
     current_balance REAL NOT NULL DEFAULT 0,
     currency TEXT NOT NULL DEFAULT 'INR',
-    color_label TEXT,
+    color_key TEXT,                                  -- palette key; null for a listed bank (colour comes from banks)
     account_suffix TEXT CHECK(account_suffix IS NULL OR (length(account_suffix) BETWEEN 3 AND 4 AND account_suffix NOT GLOB '*[^0-9]*')),
     card_suffixes TEXT NOT NULL DEFAULT '',          -- comma-separated 4-digit endings
+    bank_code TEXT CHECK(bank_code IS NULL OR (length(bank_code) BETWEEN 2 AND 10 AND bank_code NOT GLOB '*[^A-Z0-9]*')),
+    custom_bank INTEGER NOT NULL DEFAULT 0 CHECK(custom_bank IN (0, 1)),   -- no FK to banks: a custom code is never in the catalog
     display_order INTEGER NOT NULL DEFAULT 0,
     is_active INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
-    UNIQUE(user_id, name),
-    CHECK(type = 'BANK' OR (account_suffix IS NULL AND card_suffixes = ''))
+    CHECK(type = 'BANK' OR (account_suffix IS NULL AND card_suffixes = '' AND bank_code IS NULL AND custom_bank = 0)),
+    CHECK(custom_bank = 0 OR bank_code IS NOT NULL),
+    CHECK(bank_code IS NULL OR custom_bank = 1 OR color_key IS NULL)
 );
 
 CREATE INDEX idx_accounts_user ON accounts(user_id);
 CREATE UNIQUE INDEX idx_accounts_user_account_suffix ON accounts(user_id, account_suffix) WHERE account_suffix IS NOT NULL;
 CREATE UNIQUE INDEX idx_accounts_one_cash_per_user ON accounts(user_id) WHERE type = 'CASH';
+-- a listed bank's name comes from the catalog and may repeat; every other name is unique per user
+CREATE UNIQUE INDEX idx_accounts_user_name ON accounts(user_id, name) WHERE bank_code IS NULL OR custom_bank = 1;
+
+-- ============================================================
+-- BANKS (seeded catalog; changes ship as migrations, there is no admin endpoint)
+-- ============================================================
+CREATE TABLE banks (
+    code TEXT PRIMARY KEY CHECK(length(code) BETWEEN 2 AND 10 AND code NOT GLOB '*[^A-Z0-9]*'),
+    name TEXT NOT NULL,
+    display_order INTEGER NOT NULL,
+    color_light TEXT NOT NULL CHECK(color_light GLOB '#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]'),   -- as text on white
+    color_dark TEXT NOT NULL CHECK(color_dark GLOB '#[0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F][0-9A-F]'),     -- as text on #121212
+    is_active INTEGER NOT NULL DEFAULT 1
+);
 
 -- ============================================================
 -- CATEGORIES (seeded, user cannot delete system ones)
@@ -952,6 +972,12 @@ com.mnyace
 │   ├── DashboardService.java         Assembles home screen payload
 │   └── dto/
 │       └── DashboardResponse.java
+│
+├── bank/
+│   ├── BankController.java           GET /api/banks, cached for a day with an ETag, see BR-35
+│   ├── BankRepository.java
+│   ├── BankResponse.java             { code, name }
+│   └── Bank.java                     @Entity
 │
 ├── category/
 │   ├── CategoryController.java
@@ -1333,16 +1359,19 @@ No body. Issues a fresh code; the guess counter is not reset. Rate-limited to on
 #### POST /accounts
 ```json
 {
-  "name": "MAXIS Bank",
   "type": "BANK",
+  "bankCode": "HDFC",
   "currentBalance": 35000.00,
   "currency": "INR",
-  "colorLabel": "#E8A04D",
   "accountSuffix": "3388",
   "cardSuffixes": ["8155"]
 }
 ```
-`accountSuffix` and `cardSuffixes` are optional and `BANK` only; see BR-33 for the rules and the `400` they return. `type` must be `BANK` or `WALLET`: `CASH` returns `400` (`Type must be BANK or WALLET; every user already has a Cash account`), and the name `Cash` is already taken (`409`).  
+A bank that is not in the list is sent with `"customBank": true`, plus its own `bankCode` and a `name`:
+```json
+{ "type": "BANK", "customBank": true, "bankCode": "LCOOP", "name": "Local Co-operative Bank", "accountSuffix": "3388" }
+```
+`colorKey` is optional and is one of the app's colour names (BR-36); it is refused for a listed bank, and an account left without one is given a colour automatically. `bankCode` and `customBank` are optional and `BANK` only, and follow BR-35: for a listed bank the server sets `name` from the catalog and ignores any `name` sent. `accountSuffix` is required on a `BANK` account (a missing, `null` or blank value is `400 VALIDATION_ERROR`); `cardSuffixes` stays optional. See BR-33 for the digit rules and the `400` they return. `type` must be `BANK` or `WALLET`: `CASH` returns `400` (`Type must be BANK or WALLET; every user already has a Cash account`), and the name `Cash` is already taken (`409`).  
 **Response 201:** Full account object  
 **Side effect:** If `currentBalance > 0`, auto-creates a `SETTLEMENT/Adjustment` transaction. This produces the "Current Balance / Adjustment" entries visible in the Figma Cash Flow list.  
 **Side effect:** Increments `user.onboardingStep` to 1 if currently 0.
@@ -1358,8 +1387,8 @@ Useful for filtering account dropdowns in various UI contexts (e.g. show only BA
 {
   "data": {
     "accounts": [
-      { "id": "uuid", "name": "Cash", "type": "CASH", "currentBalance": 1250.00, "colorLabel": null, "accountSuffix": null, "cardSuffixes": [], "goalLinked": false },
-      { "id": "uuid", "name": "India Bank", "type": "BANK", "currentBalance": 3457.55, "colorLabel": "#4A90D9", "accountSuffix": "3388", "cardSuffixes": ["8155"], "goalLinked": true }
+      { "id": "uuid", "name": "Cash", "type": "CASH", "currentBalance": 1250.00, "colorKey": "green", "colorLight": null, "colorDark": null, "bankCode": null, "customBank": false, "accountSuffix": null, "cardSuffixes": [], "goalLinked": false, "createdAt": "2026-11-01T04:30:00.000Z" },
+      { "id": "uuid", "name": "Bank of India", "type": "BANK", "currentBalance": 3457.55, "colorKey": null, "colorLight": "#4B6CB7", "colorDark": "#5F7CBF", "bankCode": "BOI", "customBank": false, "accountSuffix": "3388", "cardSuffixes": ["8155"], "goalLinked": true, "createdAt": "2026-11-02T09:12:41.500Z" }
     ],
     "totalBalance": 38457.55
   }
@@ -1370,11 +1399,11 @@ Useful for filtering account dropdowns in various UI contexts (e.g. show only BA
 
 #### GET /accounts/{id} — same shape as a single entry above, including `goalLinked`.
 
-#### PUT /accounts/{id} — name, type, colorLabel, accountSuffix, cardSuffixes, currentBalance (triggers BR-02's auto `SETTLEMENT/Adjustment`).
+#### PUT /accounts/{id} — name, type, colorKey, bankCode, customBank, accountSuffix, cardSuffixes, currentBalance (triggers BR-02's auto `SETTLEMENT/Adjustment`).
 
-`accountSuffix` and `cardSuffixes` follow BR-33: omitted leaves a field unchanged, an explicit `null` clears `accountSuffix`, and `cardSuffixes` replaces the whole list (`[]` clears it). They are checked before anything is changed and never affect the balance or the goal-allocation flow below.
+`accountSuffix` and `cardSuffixes` follow BR-33: omitted leaves a field unchanged, an explicit `null` on a `BANK` account is `400` (the digits can be replaced but not removed), and `cardSuffixes` replaces the whole list (`[]` clears it). `bankCode` and `customBank` follow BR-35: omitted leaves the bank unchanged, and switching to another listed bank renames the account. `createdAt` is never accepted. They are checked before anything is changed and never affect the balance or the goal-allocation flow below.
 
-On the seeded Cash account only `currentBalance` can be edited: setting it records what cash the user holds today. A request that changes its `name`, `type` or `colorLabel` returns `400` (`The Cash account can only have its balance edited.`); resending the stored values unchanged is fine. No other account can become `CASH` (`400`).
+On the seeded Cash account only `currentBalance` can be edited: setting it records what cash the user holds today. A request that changes its `name`, `type`, `colorKey` or bank returns `400` (`The Cash account can only have its balance edited.`); resending the stored values unchanged is fine. No other account can become `CASH` (`400`).
 
 **Downward correction on a goal-linked account (v1.5.0 — see BR-20):**
 ```json
@@ -1497,7 +1526,7 @@ Three request shapes depending on the tab selected in the Add Entry form.
     "date": "2024-06-14",
     "type": "VARIABLE_EXPENSE",
     "category": { "id": "cat-12", "name": "Groceries", "icon": "🛒" },
-    "account": { "id": "uuid", "name": "MAXIS Bank", "colorLabel": "#E8A04D" },
+    "account": { "id": "uuid", "name": "MAXIS Bank", "colorKey": null, "colorLight": "#0B3A6F", "colorDark": "#1B7CE8", "bankCode": "HDFC", "accountSuffix": "3388" },
     "amount": 919.19,
     "displayAmount": "-₹919.19",
     "notes": "Vijetha",
@@ -1708,7 +1737,7 @@ Both `POST /transactions` and `PUT /transactions/{id}` reject any `date` later t
     "id": "uuid",
     "name": "Emergency Fund",
     "targetAmount": 100000.00,
-    "account": { "id": "uuid", "name": "India Bank" },
+    "account": { "id": "uuid", "name": "India Bank", "colorKey": null, "colorLight": "#4B6CB7", "colorDark": "#5F7CBF", "bankCode": "BOI", "accountSuffix": "3388" },
     "startDate": "2024-05-01",
     "endDate": "2025-04-01",
     "currentProgress": 0.00,
@@ -1775,15 +1804,15 @@ Single endpoint — assembles everything the Home screen needs in one call.
       "savingsMessage": "You can save ₹22,500 today!"
     },
     "accounts": [
-      { "id": "uuid", "name": "Cash", "currentBalance": 1250.00, "type": "CASH", "colorLabel": null },
-      { "id": "uuid", "name": "India Bank", "currentBalance": 3457.55, "type": "BANK", "colorLabel": "#4A90D9" }
+      { "id": "uuid", "name": "Cash", "currentBalance": 1250.00, "type": "CASH", "colorKey": "green", "colorLight": null, "colorDark": null, "bankCode": null, "customBank": false, "accountSuffix": null, "createdAt": "2026-11-01T04:30:00.000Z" },
+      { "id": "uuid", "name": "Bank of India", "currentBalance": 3457.55, "type": "BANK", "colorKey": null, "colorLight": "#4B6CB7", "colorDark": "#5F7CBF", "bankCode": "BOI", "customBank": false, "accountSuffix": "3388", "createdAt": "2026-11-02T09:12:41.500Z" }
     ],
     "lastEntries": [
       {
         "id": "uuid",
         "notes": "Vijetha",
         "category": { "name": "Groceries", "icon": "🛒" },
-        "account": { "name": "MAXIS Bank", "colorLabel": "#E8A04D" },
+        "account": { "name": "MAXIS Bank", "colorKey": null, "colorLight": "#0B3A6F", "colorDark": "#1B7CE8", "bankCode": "HDFC", "accountSuffix": "3388" },
         "displayAmount": "-₹919.19",
         "date": "2024-06-14"
       }
@@ -1872,6 +1901,23 @@ Full monthly breakdown. **Phase 2** — deferred until `MonthSummary` computatio
 
 #### GET /analytics/yearly/{financialYear}
 Full FY rollup. **Phase 2** — deferred. Year view in the Cash Flow screen is also Phase 2.
+
+### Banks
+
+#### GET /banks
+The bank catalog a user picks from when adding a `BANK` account. Authenticated, standard envelope. Returns active banks only, ordered by `displayOrder` then `name`, each as `{ code, name, colorLight, colorDark }`: the bank's colour as `#RRGGBB` for text on a white page and on a `#121212` page (BR-36), so the app keeps no colour map for banks. There is no order field. It changes only in a migration, so the response carries `Cache-Control: private, max-age=86400` and an `ETag`; a request with a matching `If-None-Match` gets `304`.
+
+```json
+{
+  "data": [
+    { "code": "SBI", "name": "State Bank of India", "colorLight": "#2B7FD1", "colorDark": "#2B7FD1" },
+    { "code": "HDFC", "name": "HDFC Bank", "colorLight": "#0B3A6F", "colorDark": "#1B7CE8" },
+    { "code": "ICICI", "name": "ICICI Bank", "colorLight": "#F58220", "colorDark": "#F58220" }
+  ]
+}
+```
+
+---
 
 ### Categories
 
@@ -2401,11 +2447,13 @@ A user who has forgotten their password gets a 6-digit one-time code by email, t
 
 **Why:** the Android app turns a bank SMS into a transaction, and the SMS names the account by its last 3 or 4 digits (`A/c XX3388`) and a card spend by its last 4 (`Card x8155`). The app matches those digits against the user's accounts, so the account stores them. Only these endings are ever stored, never a full account or card number.
 
-**Shape.** `accountSuffix` is 3 or 4 digits; each `cardSuffixes` entry is exactly 4 digits, with no repeats and at most 5 per account. Only a `BANK` account may have either: `WALLET` and `CASH` return `400`. On the Cash account, a `null` or empty value counts as unchanged, since the edit form resends every field. Changing a `BANK` account's type needs its digits cleared in the same request.
+**Shape.** `accountSuffix` is 3 or 4 digits; each `cardSuffixes` entry is exactly 4 digits, with no repeats and at most 5 per account. Only a `BANK` account may have either: `WALLET` and `CASH` return `400`. On the Cash account, a `null` or empty value counts as unchanged, since the edit form resends every field. Changing a `BANK` account's type needs its digits cleared in the same request, which for `accountSuffix` means sending `null` together with the new type.
 
 **Unique per user among active accounts**, because a match must be unambiguous. A card ending may not appear on two accounts, and an account suffix may not equal, or be the tail of, another account's suffix (`388` and `3388` could not be told apart in an SMS). Each breach returns `400 VALIDATION_ERROR` naming the field and never echoing the digits. Deleting an account clears its digits, so they are free to reuse. The database backs this with a unique index on `(user_id, account_suffix)`, a `CHECK` on length and digits, and a `CHECK` that only `BANK` rows carry any.
 
-**Editing.** On `PUT /accounts/{id}`, an omitted field is left alone, an explicit `null` clears `accountSuffix`, and `cardSuffixes` replaces the list. The rules run before any field is changed, so a refused edit changes nothing, including the balance. The digits are not sensitive beyond the account name, but they are kept out of logs.
+**Required on a new `BANK` account.** `POST /accounts` with type `BANK` and a missing, `null` or blank `accountSuffix` returns `400 VALIDATION_ERROR` (`accountSuffix is required for a BANK account`), because without the digits an SMS cannot be matched to the account. `WALLET` is unaffected, and `cardSuffixes` stays optional. A client built before this rule creates `BANK` accounts without digits and gets this `400`.
+
+**Editing.** On `PUT /accounts/{id}`, an omitted field is left alone, `cardSuffixes` replaces the list, and `accountSuffix` can be replaced but not removed: an explicit `null` on a `BANK` account is `400`, so an account that predates the rule keeps working (balance, colour) until the user adds its digits. The rules run before any field is changed, so a refused edit changes nothing, including the balance. The digits are not sensitive beyond the account name, but they are kept out of logs.
 
 ### BR-34: Import Reference and Source
 
@@ -2427,6 +2475,37 @@ A user who has forgotten their password gets a 6-digit one-time code by email, t
 So `Swiggy `, `SWIGGY 1234` and `swiggy*` all become `SWIGGY`, and `AMZN*Mktp 12/34 - IN` becomes `AMZNMKTP IN`. Other punctuation and non-ASCII letters stay.
 
 **What `GET /transactions/merchant-categories` returns.** The user's transactions that have a key, grouped by key. Per merchant the winning category is the one with the most transactions; a tie goes to the category touched most recently (`updatedAt`). It is read live from each transaction's current category, with no separate log, so a `PUT` that corrects a category changes what is learned and a deleted transaction stops counting. Inactive and internal categories (BR-17) are skipped: a merchant whose best category is inactive falls back to its next best, and is omitted when none is left. Merchants are ordered by most recent use, then capped by `limit`.
+
+### BR-35: Bank Catalog and an Account's Bank
+
+**Why:** the app shows an account as its bank plus the last digits (`BOI-2864`) and colours it by bank, so the account records which bank it is, picked from a list the server owns instead of free text that every client spells differently.
+
+**The catalog** is the `banks` table, seeded by migration with the major Indian banks, ordered by how common they are. It is changed by a new migration, never by an endpoint. A bank made inactive disappears from `GET /banks` and cannot be picked again, but stays on the accounts that already use it, and an unchanged resend of its code on such an account is accepted. Codes are 2 to 10 upper-case letters or digits (`^[A-Z0-9]{2,10}$`); a lowercase code is `400`, not corrected.
+
+**Two ways to set a `BANK` account's bank**, on `POST` and `PUT /accounts`:
+- **Listed bank:** send `bankCode` alone. It must be in the catalog and active (`400` otherwise). The server sets `name` from the catalog and ignores any `name` sent. Because that name is shared, two accounts at the same listed bank are allowed (the digits tell them apart).
+- **Other bank:** send `customBank: true` with `bankCode` and `name`, both required. The code follows the same pattern and must not exist in the catalog, active or not (`400`, `That bankCode is reserved by the bank list`). The name stays unique per user (`409`), like any account name outside the catalog.
+
+`customBank` is stored and returned so a code that joins the catalog later is never mistaken for a listed bank: an existing custom account keeps its own name, and resending its own code on an edit is accepted. A `BANK` account may still have no `bankCode` (every account created before the catalog); it is never required, and such an account is edited as before.
+
+**Only `BANK`.** `WALLET` and `CASH` return `400` for a `bankCode`, or for `customBank: true`; a `null` or `false` counts as unchanged, since the edit form resends every field. Changing a `BANK` account with a bank to `WALLET` is `400` until it is cleared, like the digits in BR-33.
+
+**Editing.** On `PUT`, omitting `bankCode` leaves the bank and the name alone. A different `bankCode` switches the bank: another listed bank renames the account to its catalog name; moving between a listed and an "other" bank follows the two cases above (`customBank: true` and a `name` to go to "other", a listed `bankCode` alone to go back). Sending `customBank` without a `bankCode` that agrees with the stored value is `400`. Everything is checked before any field is changed, so a refused edit changes nothing.
+
+**`createdAt`.** Every account response carries `createdAt` as an ISO-8601 instant, the setup date BR-13 compares against, so the app can import a bank message for the account only if it is newer. It is never client-set, is ignored on `PUT`, and does not change when the account is edited.
+
+**Where an account appears beside a transaction.** `bankCode` and `accountSuffix` sit beside the account name wherever it is embedded: the `account` and `toAccount` objects on every transaction response, and the `account` object on goal responses. The dashboard's `accounts` list is the full account object and carries them already, and its `lastEntries` are transaction responses. Together they let a cashflow row show `BOI-2864` without a second lookup.
+
+### BR-36: Account Colours
+
+**Why:** every account is shown with a colour. The app already owns ten named colours and their light and dark themes, so the server stores only the name where the user picks one. The catalog banks have colours of their own, kept as a light and a dark value, because the app cannot derive a readable dark colour from a brand colour.
+
+**Two sources, never both:**
+- **Account at a listed bank:** the colour is the catalog's (`banks.color_light` for text on white, `banks.color_dark` for text on `#121212`, both `#RRGGBB`), returned as `colorLight` and `colorDark` on every response, so a colour change shipped in a migration reaches existing accounts. The account stores no key, and a `colorKey` in the request is `400`. Moving an account to a listed bank drops its key.
+- **Everything else (wallet, other bank, an older bank account without a code):** a `colorKey`, one of `blue`, `teal`, `green`, `yellow`, `orange`, `red`, `pink`, `purple`, `deep-purple`, `brown`; these are the app's own names and the app resolves them to colours. A key outside the list is `400`. Omitting it on `PUT` keeps the stored one; an account created or moved here without one is given the name the user's other active accounts use least. An "other" bank never takes a catalog colour, even if its code joins the catalog later. `colorLight` and `colorDark` are null.
+- **Cash:** fixed to `green`, and a request that changes it is `400`; resending the stored value is fine.
+
+**Responses.** Every account response carries `colorKey` (null for a listed bank) and `colorLight` and `colorDark` (null for everyone else). The `account` and `toAccount` objects on transactions and the `account` on goals carry all three. `GET /banks` returns each bank's `colorLight` and `colorDark`. The old free-text `colorLabel` no longer exists. Only the catalog banks have a light and dark pair: the app's ten names carry no hex here, since the app resolves them and their themes itself.
 
 ---
 

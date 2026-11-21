@@ -29,6 +29,8 @@ public abstract class AuthIntegrationTestBase {
     protected static final ObjectMapper JSON = new ObjectMapper();
 
     private static final AtomicInteger NEXT_IP = new AtomicInteger(1);
+    // four digits, none ending another, so no two accounts can clash on an SMS suffix
+    private static final AtomicInteger NEXT_DIGITS = new AtomicInteger(1000);
 
     @LocalServerPort
     protected int port;
@@ -48,6 +50,11 @@ public abstract class AuthIntegrationTestBase {
         registry.add("rate-limit.api.ip.capacity", () -> "100000");
         // the shared admin signs in many times across a class; tests about the cap lower this
         registry.add("session.max-per-user", () -> "1000");
+    }
+
+    /** Account digits no other test account holds, as a BANK account now needs its own. */
+    protected static String freshDigits() {
+        return String.valueOf(NEXT_DIGITS.getAndIncrement());
     }
 
     /** A unique client IP per call, so tests never share an IP bucket. */
